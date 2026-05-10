@@ -1,0 +1,10 @@
+project_id = "rdpbedszveplmssiwagx"
+
+[functions.analyze-report]
+verify_jwt = false
+
+[functions.chat-assistant]
+verify_jwt = false
+
+[functions.predict-risk]
+verify_jwt = false

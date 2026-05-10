@@ -1,0 +1,109 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Hospital Lab Report Assistant — clean medical design system */
+
+@layer base {
+  :root {
+    --background: 210 40% 99%;
+    --foreground: 215 30% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 30% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 30% 15%;
+
+    --primary: 195 85% 41%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 188 90% 55%;
+
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 215 30% 15%;
+
+    --muted: 210 30% 95%;
+    --muted-foreground: 215 15% 45%;
+
+    --accent: 188 80% 92%;
+    --accent-foreground: 195 85% 25%;
+
+    --success: 145 65% 42%;
+    --success-foreground: 0 0% 100%;
+    --success-soft: 145 60% 94%;
+
+    --warning: 35 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --destructive: 0 75% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive-soft: 0 75% 96%;
+
+    --border: 210 25% 90%;
+    --input: 210 25% 90%;
+    --ring: 195 85% 41%;
+
+    --radius: 0.75rem;
+
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+    --gradient-soft: linear-gradient(135deg, hsl(210 40% 99%), hsl(188 80% 96%));
+    --shadow-card: 0 1px 3px 0 hsl(215 30% 15% / 0.04), 0 1px 2px -1px hsl(215 30% 15% / 0.04);
+    --shadow-elevated: 0 10px 30px -10px hsl(195 85% 41% / 0.18);
+  }
+
+  .dark {
+    --background: 215 35% 8%;
+    --foreground: 210 30% 95%;
+
+    --card: 215 30% 11%;
+    --card-foreground: 210 30% 95%;
+
+    --popover: 215 30% 11%;
+    --popover-foreground: 210 30% 95%;
+
+    --primary: 188 90% 55%;
+    --primary-foreground: 215 35% 8%;
+    --primary-glow: 195 85% 60%;
+
+    --secondary: 215 25% 16%;
+    --secondary-foreground: 210 30% 95%;
+
+    --muted: 215 25% 14%;
+    --muted-foreground: 215 15% 65%;
+
+    --accent: 195 60% 20%;
+    --accent-foreground: 188 90% 80%;
+
+    --success: 145 55% 50%;
+    --success-foreground: 215 35% 8%;
+    --success-soft: 145 40% 16%;
+
+    --warning: 35 92% 55%;
+    --warning-foreground: 215 35% 8%;
+
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive-soft: 0 50% 18%;
+
+    --border: 215 25% 18%;
+    --input: 215 25% 18%;
+    --ring: 188 90% 55%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+    --gradient-soft: linear-gradient(135deg, hsl(215 35% 8%), hsl(215 30% 12%));
+    --shadow-card: 0 1px 3px 0 hsl(0 0% 0% / 0.3);
+    --shadow-elevated: 0 10px 30px -10px hsl(188 90% 55% / 0.25);
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground antialiased; }
+}
+
+@layer utilities {
+  .bg-gradient-primary { background: var(--gradient-primary); }
+  .bg-gradient-soft { background: var(--gradient-soft); }
+  .shadow-card { box-shadow: var(--shadow-card); }
+  .shadow-elevated { box-shadow: var(--shadow-elevated); }
+}
