@@ -5,7 +5,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY="sb_publishable_6f8M6k9HWT3bGECFha1liQ_1119Mv0F"
 VITE_SUPABASE_URL="https://rqjkjwekuwrgprvbzqlk.supabase.co"
 
 # AI gateway (Hugging Face or other) - replace with your keys
-AI_GATEWAY_KEY=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
+AI_GATEWAY_KEY=
 # AI_GATEWAY_MODEL=openai/gpt-4o-medical
 AI_GATEWAY_URL=https://api-inference.huggingface.co/models/medicalai/ClinicalBERT
 USE_HF_API=true
