@@ -1,0 +1,27 @@
+# .env - local development variables (DO NOT commit this file)
+# Existing Supabase values (keep or replace if needed)
+VITE_SUPABASE_PROJECT_ID="rqjkjwekuwrgprvbzqlk"
+VITE_SUPABASE_PUBLISHABLE_KEY="sb_publishable_6f8M6k9HWT3bGECFha1liQ_1119Mv0F"
+VITE_SUPABASE_URL="https://rqjkjwekuwrgprvbzqlk.supabase.co"
+
+# AI gateway (Hugging Face or other) - replace with your keys
+AI_GATEWAY_KEY=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
+# AI_GATEWAY_MODEL=openai/gpt-4o-medical
+AI_GATEWAY_URL=https://api-inference.huggingface.co/models/medicalai/ClinicalBERT
+USE_HF_API=true
+
+# Clinical gating (keep false until clinician validation)
+ENABLE_CLINICAL_INDICATIONS=false
+CLINICIAN_APPROVED=false
+
+# Backwards-compatibility (optional)
+LOVABLE_API_KEY=
+LOVABLE_MODEL=
+
+# Optional: run analyzer locally if you prefer a deterministic extractor
+USE_LOCAL_ANALYZER=false
+
+# Notes:
+# - After editing, load variables into your PowerShell session with:
+#   Get-Content .\.env | ForEach-Object { if ($_ -and $_ -notmatch '^\s*#') { $parts = $_ -split '=',2; if ($parts.Length -eq 2) { Set-Item -Path Env:\$($parts[0].Trim()) -Value $parts[1].Trim() } } }
+# - Add this file to .gitignore to avoid committing secrets.

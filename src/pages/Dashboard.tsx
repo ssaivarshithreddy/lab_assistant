@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { cloudEnabled } from "@/lib/cloudMode";
+import { getLocalReports } from "@/lib/localReports";
 import { cn } from "@/lib/utils";
 
 type ValueObj = { value?: number; unit?: string; status?: "low" | "normal" | "high" };
@@ -16,6 +19,11 @@ type Prediction = {
   insights?: string[];
   score?: number;
   confidence?: number;
+  ai_engine?: {
+    clinicalbert_used?: boolean;
+    source?: string;
+    entities_detected?: number;
+  };
 };
 type ReportRow = {
   id: string;
@@ -31,6 +39,29 @@ const METRICS: { key: string; label: string }[] = [
   { key: "wbc", label: "WBC" },
   { key: "rbc", label: "RBC" },
   { key: "platelets", label: "Platelets" },
+  { key: "glucose", label: "Glucose" },
+  { key: "hematocrit", label: "Hematocrit" },
+  { key: "mcv", label: "MCV" },
+  { key: "mch", label: "MCH" },
+  { key: "mchc", label: "MCHC" },
+  { key: "neutrophils", label: "Neutrophils" },
+  { key: "lymphocytes", label: "Lymphocytes" },
+  { key: "monocytes", label: "Monocytes" },
+  { key: "eosinophils", label: "Eosinophils" },
+  { key: "basophils", label: "Basophils" },
+  { key: "creatinine", label: "Creatinine" },
+  { key: "urea", label: "Urea" },
+  { key: "bun", label: "BUN" },
+  { key: "sodium", label: "Sodium" },
+  { key: "potassium", label: "Potassium" },
+  { key: "chloride", label: "Chloride" },
+  { key: "calcium", label: "Calcium" },
+  { key: "bilirubin", label: "Bilirubin" },
+  { key: "ast", label: "AST" },
+  { key: "alt", label: "ALT" },
+  { key: "alp", label: "ALP" },
+  { key: "crp", label: "CRP" },
+  { key: "hba1c", label: "HbA1c" },
 ];
 
 const statusStyle = {
@@ -40,6 +71,7 @@ const statusStyle = {
 } as const;
 
 const Dashboard = () => {
+  const { user } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
   const [reports, setReports] = useState<ReportRow[]>([]);
@@ -48,13 +80,35 @@ const Dashboard = () => {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const { data } = await supabase.from("reports").select("*").order("created_at", { ascending: false });
-      const rows = (data ?? []) as ReportRow[];
+      let cloudRows: ReportRow[] = [];
+      let cloudOk = false;
+      if (cloudEnabled()) {
+        try {
+          const { data, error } = await supabase
+            .from("reports")
+            .select("*")
+            .eq("user_id", user?.id ?? "")
+            .order("created_at", { ascending: false });
+          if (error) throw error;
+          cloudRows = (data ?? []) as ReportRow[];
+          cloudOk = true;
+        } catch (e) {
+          console.warn("Cloud reports unavailable, using local reports only:", e);
+        }
+      }
+
+      // Use local cache only when cloud is unavailable.
+      const rows = cloudOk
+        ? cloudRows
+        : (getLocalReports(user?.id) as unknown as ReportRow[]).sort(
+            (a, b) => +new Date(b.created_at) - +new Date(a.created_at)
+          );
+
       setReports(rows);
       if (!id && rows[0]) navigate(`/dashboard/${rows[0].id}`, { replace: true });
       setLoading(false);
     })();
-  }, [id, navigate]);
+  }, [id, navigate, user?.id]);
 
   const current = useMemo(() => reports.find((r) => r.id === id) ?? reports[0], [reports, id]);
 
@@ -161,6 +215,26 @@ const Dashboard = () => {
           );
         })}
       </div>
+
+      <Card className="shadow-card">
+        <CardHeader>
+          <CardTitle>ClinicalBERT status</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {current.prediction?.ai_engine ? (
+            <div className="text-sm">
+              <div className="font-medium">
+                {current.prediction.ai_engine.clinicalbert_used ? "ClinicalBERT enrichment active" : "Regex-only fallback used"}
+              </div>
+              <div className="text-muted-foreground">
+                Source: {current.prediction.ai_engine.source || "unknown"} · Entities: {current.prediction.ai_engine.entities_detected ?? 0}
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">No AI engine metadata available for this report.</div>
+          )}
+        </CardContent>
+      </Card>
 
       {current.prediction?.risk_level && (
         <Card className={cn(
