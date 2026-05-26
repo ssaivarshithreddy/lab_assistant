@@ -6,12 +6,16 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { extractTextFromFile } from "@/lib/extractText";
 import { analyzeReport } from "@/lib/analyzeReport";
 import { predictRisk } from "@/lib/predictRisk";
+import { createLocalReport } from "@/lib/localReports";
+import { cloudEnabled } from "@/lib/cloudMode";
 import { cn } from "@/lib/utils";
 
 const Upload = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -48,8 +52,10 @@ const Upload = () => {
       setProgress(5);
 
       // Start upload in parallel to save wall clock time; we'll await its completion before saving report.
-      const path = `${crypto.randomUUID()}-${file.name}`;
-      const uploadPromise = supabase.storage.from("lab-reports").upload(path, file);
+      if (!user) throw new Error("You must be signed in to analyze reports.");
+      const path = `${user.id}/${crypto.randomUUID()}-${file.name}`;
+      const useCloud = cloudEnabled();
+      const uploadPromise = useCloud ? supabase.storage.from("lab-reports").upload(path, file) : null;
 
       // Extract text (may be CPU-heavy). Progress updates come from extractTextFromFile.
       const rawText = await extractTextFromFile(file, (m) => {
@@ -70,14 +76,30 @@ const Upload = () => {
       const ml = predictRisk(ai.values as any);
       console.log("ML predict-risk response:", ml);
 
+      if (!useCloud) {
+        const localReport = createLocalReport({
+          file_name: file.name,
+          file_path: path,
+          raw_text: rawText,
+          values: (ml?.enriched_values ?? ai.values ?? {}) as any,
+          summary: ai.summary ?? "",
+          prediction: { ...(ml ?? {}), ai_engine: ai.ai_engine ?? null } as any,
+        }, user.id);
+        setProgress(100);
+        toast.success("Report analyzed in local mode.");
+        navigate(`/dashboard/${localReport.id}`);
+        return;
+      }
+
       // Ensure upload finished (or surface upload error)
       setStage("Uploading file to storage...");
       setProgress(85);
-      const { error: upErr } = await uploadPromise;
+      const { error: upErr } = await uploadPromise!;
+      let cloudFilePath: string | null = path;
       if (upErr) {
         console.error("Upload error:", upErr);
-        toast.error("Failed to upload file: " + (upErr.message || JSON.stringify(upErr)));
-        throw upErr;
+        cloudFilePath = null;
+        toast.warning("Storage upload failed. Saving report in cloud DB without file attachment.");
       }
 
       setStage("Saving report metadata...");
@@ -86,22 +108,45 @@ const Upload = () => {
         .from("reports")
         .insert({
           file_name: file.name,
+          user_id: user.id,
+          file_path: cloudFilePath,
+          raw_text: rawText,
+          values: (ml?.enriched_values ?? ai.values ?? {}) as any,
+          summary: ai.summary ?? "",
+          prediction: { ...(ml ?? {}), ai_engine: ai.ai_engine ?? null } as any,
+        })
+        .select()
+        .single();
+      if (insErr) {
+        console.error("Insert error:", insErr);
+        const localReport = createLocalReport({
+          file_name: file.name,
           file_path: path,
           raw_text: rawText,
           values: (ml?.enriched_values ?? ai.values ?? {}) as any,
           summary: ai.summary ?? "",
-          prediction: (ml ?? {}) as any,
-        })
-        .select()
-        .single();
-      if (insErr) throw insErr;
+          prediction: { ...(ml ?? {}), ai_engine: ai.ai_engine ?? null } as any,
+        }, user.id);
+        toast.warning("Cloud database unavailable. Report saved locally in this browser.");
+        navigate(`/dashboard/${localReport.id}`);
+        return;
+      }
+
+      if (cloudFilePath === null) {
+        toast.warning("Report saved to cloud DB, but file upload failed. Check Supabase Storage bucket/policies.");
+      }
 
       setProgress(100);
       toast.success("Report analyzed!");
       navigate(`/dashboard/${report.id}`);
     } catch (e: any) {
       console.error(e);
-      toast.error(e.message || "Something went wrong");
+      const msg = String(e?.message || "");
+      if (/failed to fetch/i.test(msg)) {
+        toast.error("Network request failed. Check internet/Supabase connection and try again.");
+      } else {
+        toast.error(e.message || "Something went wrong");
+      }
     } finally {
       setBusy(false);
       setStage("");

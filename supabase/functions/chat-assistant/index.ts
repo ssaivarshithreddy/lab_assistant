@@ -9,8 +9,8 @@ Deno.serve(async (req) => {
 
   try {
     const { messages, reportContext } = await req.json();
-    const API_KEY = Deno.env.get("AI_GATEWAY_KEY") || Deno.env.get("LOVABLE_API_KEY");
-    if (!API_KEY) throw new Error("AI_GATEWAY_KEY or LOVABLE_API_KEY missing");
+    const API_KEY = Deno.env.get("AI_GATEWAY_KEY");
+    if (!API_KEY) throw new Error("AI_GATEWAY_KEY missing");
 
     const systemPromptBase = `You are a helpful medical lab assistant. Explain lab reports in simple, non-alarming language. Do NOT provide definitive diagnoses. Only provide general health insights. Always suggest consulting a doctor for medical decisions. Keep answers concise and friendly.`;
     const clinicalEnabled = Deno.env.get("ENABLE_CLINICAL_INDICATIONS") === "true" && Deno.env.get("CLINICIAN_APPROVED") === "true";
@@ -21,36 +21,49 @@ Deno.serve(async (req) => {
       ? systemPromptBase + `\n\nWhen clinical indicators are present, you MAY indicate likely conditions with conservative confidence estimates and explain which values support the indication. Use cautious, non-definitive language and always recommend clinician review.\n\nUser's report context:\n${reportContext || "(no report uploaded yet)"}`
       : systemPromptBase + `\n\nUser's report context:\n${reportContext || "(no report uploaded yet)"}`;
 
-    // Default to a clinically-oriented model; can be overridden via AI_GATEWAY_MODEL or LOVABLE_MODEL env var.
-    const MODEL = Deno.env.get("AI_GATEWAY_MODEL") || Deno.env.get("LOVABLE_MODEL") || "openai/gpt-4o-medical";
+    // Default to a clinically-oriented model; can be overridden via AI_GATEWAY_MODEL env var.
+    const MODEL = Deno.env.get("AI_GATEWAY_MODEL") || "openai/gpt-4o-medical";
 
-    const GATEWAY_URL = Deno.env.get("AI_GATEWAY_URL") || "https://ai.gateway.lovable.dev/v1/chat/completions";
+    const GATEWAY_URL = Deno.env.get("AI_GATEWAY_URL") || "https://api.openai.com/v1/chat/completions";
 
     const isHF = GATEWAY_URL.includes("api-inference.huggingface.co") || Deno.env.get("USE_HF_API") === "true";
 
     if (isHF) {
       // Hugging Face does not stream in this setup; synthesize a simple assistant reply by asking the model to return a plaintext answer.
       const promptText = `SYSTEM:\n${systemPrompt}\n\nMESSAGES:\n${messages.map(m=>`${m.role.toUpperCase()}: ${m.content}`).join('\n\n')}\n\nRespond with a concise assistant reply only (no extra commentary).`;
-      const hfResp = await fetch(GATEWAY_URL, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ inputs: promptText, parameters: { max_new_tokens: 256 } }),
-      });
+      try {
+        const hfResp = await fetch(GATEWAY_URL, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ inputs: promptText, parameters: { max_new_tokens: 256 } }),
+        });
 
-      if (!hfResp.ok) {
-        const t = await hfResp.text();
-        console.error("HF error", hfResp.status, t);
-        return new Response(JSON.stringify({ error: "HF gateway error", details: t }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        if (!hfResp.ok) {
+          const t = await hfResp.text();
+          console.error("HF error", hfResp.status, t);
+          const latestUserText = [...messages].reverse().find((m) => m?.role === "user")?.content || "";
+          return new Response(
+            JSON.stringify({ reply: buildOfflineReply(latestUserText), warning: `HF gateway error ${hfResp.status}` }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+
+        const hfData = await hfResp.json();
+        let textOut = '';
+        if (Array.isArray(hfData) && hfData[0]?.generated_text) textOut = hfData[0].generated_text;
+        else if (hfData.generated_text) textOut = hfData.generated_text;
+        else if (typeof hfData === 'string') textOut = hfData;
+        else textOut = JSON.stringify(hfData);
+
+        return new Response(JSON.stringify({ reply: textOut }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      } catch (err) {
+        console.error("HF fetch failed", err);
+        const latestUserText = [...messages].reverse().find((m) => m?.role === "user")?.content || "";
+        return new Response(
+          JSON.stringify({ reply: buildOfflineReply(latestUserText), warning: "HF provider unreachable (DNS/network)" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
       }
-
-      const hfData = await hfResp.json();
-      let textOut = '';
-      if (Array.isArray(hfData) && hfData[0]?.generated_text) textOut = hfData[0].generated_text;
-      else if (hfData.generated_text) textOut = hfData.generated_text;
-      else if (typeof hfData === 'string') textOut = hfData;
-      else textOut = JSON.stringify(hfData);
-
-      return new Response(JSON.stringify({ reply: textOut }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const resp = await fetch(GATEWAY_URL, {
@@ -77,3 +90,71 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });
+    const parseValuesFromContext = (ctx: string): Record<string, { value?: number; unit?: string; status?: string }> => {
+      const marker = "Values:";
+      const idx = ctx.indexOf(marker);
+      if (idx === -1) return {};
+      const rest = ctx.slice(idx + marker.length).trim();
+      const end = rest.indexOf("\nML Prediction:");
+      const jsonPart = (end >= 0 ? rest.slice(0, end) : rest).trim();
+      try {
+        return JSON.parse(jsonPart);
+      } catch {
+        return {};
+      }
+    };
+
+    const explainMetric = (name: string, v?: { value?: number; unit?: string; status?: string }) => {
+      if (!v || v.value == null) return `${name}: not detected in this report.`;
+      const status = v.status || "unknown";
+      return `${name}: ${v.value} ${v.unit || ""} (${status}).`;
+    };
+
+    const buildOfflineReply = (latestUserText: string) => {
+      const q = (latestUserText || "").toLowerCase();
+      const values = parseValuesFromContext(reportContext || "");
+      const intro = "AI provider is unreachable right now, so this is a local fallback explanation based on your uploaded values.";
+
+      if (q.includes("wbc")) {
+        const wbc = values.wbc;
+        const base = explainMetric("WBC", wbc);
+        const meaning =
+          wbc?.status === "high"
+            ? "High WBC can be seen with infection, inflammation, stress response, or certain medications. It is a signal to correlate with symptoms and doctor review."
+            : wbc?.status === "low"
+            ? "Low WBC can indicate reduced immune defense and should be clinically reviewed, especially if fever/infections are present."
+            : "WBC appears within typical range in this report.";
+        return `${intro}\n\n${base}\n\n${meaning}\n\nNot medical advice. Please confirm with your doctor.`;
+      }
+
+      if (q.includes("platelet")) {
+        const p = values.platelets;
+        const base = explainMetric("Platelets", p);
+        const meaning =
+          p?.status === "high"
+            ? "High platelets can happen with inflammation, iron deficiency, recovery phase after infection, or other causes; your doctor may correlate with history."
+            : p?.status === "low"
+            ? "Low platelets can increase bleeding risk and usually needs prompt clinician review."
+            : "Platelets appear within typical range in this report.";
+        return `${intro}\n\n${base}\n\n${meaning}\n\nNot medical advice. Please confirm with your doctor.`;
+      }
+
+      if (q.includes("hba1c") || q.includes("a1c")) {
+        const a1c = values.hba1c;
+        const base = explainMetric("HbA1c", a1c);
+        const meaning =
+          a1c?.status === "high"
+            ? "Higher HbA1c suggests elevated average blood sugar over recent months and should be reviewed for diabetes risk with your doctor."
+            : "HbA1c does not appear elevated in this report.";
+        return `${intro}\n\n${base}\n\n${meaning}\n\nNot medical advice. Please confirm with your doctor.`;
+      }
+
+      const summary = [
+        explainMetric("Hemoglobin", values.hemoglobin),
+        explainMetric("WBC", values.wbc),
+        explainMetric("RBC", values.rbc),
+        explainMetric("Platelets", values.platelets),
+        explainMetric("Glucose", values.glucose),
+      ].join("\n");
+      return `${intro}\n\nKey values from your report:\n${summary}\n\nAsk about one marker (for example: WBC, platelets, HbA1c) for a focused explanation.\n\nNot medical advice. Please confirm with your doctor.`;
+    };

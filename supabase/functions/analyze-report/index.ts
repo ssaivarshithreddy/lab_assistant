@@ -1,4 +1,4 @@
-// Analyzes lab report text: extracts values + summary using Lovable AI
+// Analyzes lab report text: extracts values + summary using configured AI gateway
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -9,8 +9,8 @@ Deno.serve(async (req) => {
 
   try {
     const { rawText, fileName } = await req.json();
-    const API_KEY = Deno.env.get("AI_GATEWAY_KEY") || Deno.env.get("LOVABLE_API_KEY");
-    if (!API_KEY) throw new Error("AI_GATEWAY_KEY or LOVABLE_API_KEY missing");
+    const API_KEY = Deno.env.get("AI_GATEWAY_KEY");
+    if (!API_KEY) throw new Error("AI_GATEWAY_KEY missing");
 
     // systemPrompt and userPrompt are defined below (single canonical definitions are used to avoid duplicate declarations)
 
@@ -64,10 +64,10 @@ Deno.serve(async (req) => {
       },
     }];
 
-    // Default to a clinically-oriented model; can be overridden via AI_GATEWAY_MODEL or LOVABLE_MODEL env var.
-    const MODEL = Deno.env.get("AI_GATEWAY_MODEL") || Deno.env.get("LOVABLE_MODEL") || "openai/gpt-4o-medical";
+    // Default to a clinically-oriented model; can be overridden via AI_GATEWAY_MODEL env var.
+    const MODEL = Deno.env.get("AI_GATEWAY_MODEL") || "openai/gpt-4o-medical";
 
-    const GATEWAY_URL = Deno.env.get("AI_GATEWAY_URL") || "https://ai.gateway.lovable.dev/v1/chat/completions";
+    const GATEWAY_URL = Deno.env.get("AI_GATEWAY_URL") || "https://api.openai.com/v1/chat/completions";
 
     const isHF = GATEWAY_URL.includes("api-inference.huggingface.co") || Deno.env.get("USE_HF_API") === "true";
     const isClinicalBert = (Deno.env.get("AI_GATEWAY_MODEL") || "").toLowerCase().includes("clinicalbert") || GATEWAY_URL.toLowerCase().includes("clinicalbert") || Deno.env.get("USE_CLINICAL_BERT") === "true";

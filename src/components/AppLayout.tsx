@@ -1,7 +1,10 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Activity, Upload, LayoutDashboard, MessageSquareHeart, Moon, Sun } from "lucide-react";
+import { Activity, Upload, LayoutDashboard, MessageSquareHeart, Moon, Sun, LogOut } from "lucide-react";
 import { useTheme } from "next-themes";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { signOut } from "@/services/authService";
 import { cn } from "@/lib/utils";
 
 const nav = [
@@ -12,7 +15,17 @@ const nav = [
 
 const AppLayout = () => {
   const { theme, setTheme } = useTheme();
+  const { user } = useAuth();
   const { pathname } = useLocation();
+
+  const handleLogout = async () => {
+    const { error } = await signOut();
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success("Logged out successfully.");
+  };
 
   return (
     <div className="min-h-screen bg-gradient-soft">
@@ -49,15 +62,25 @@ const AppLayout = () => {
             ))}
           </nav>
 
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            aria-label="Toggle theme"
-          >
-            <Sun className="h-4 w-4 dark:hidden" />
-            <Moon className="hidden h-4 w-4 dark:block" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="hidden text-right sm:block">
+              <div className="max-w-[180px] truncate text-xs font-medium">{user?.user_metadata?.full_name || "User"}</div>
+              <div className="max-w-[180px] truncate text-[11px] text-muted-foreground">{user?.email}</div>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              aria-label="Toggle theme"
+            >
+              <Sun className="h-4 w-4 dark:hidden" />
+              <Moon className="hidden h-4 w-4 dark:block" />
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleLogout}>
+              <LogOut className="h-4 w-4" />
+              Logout
+            </Button>
+          </div>
         </div>
 
         <nav className="container flex gap-1 overflow-x-auto pb-2 md:hidden">

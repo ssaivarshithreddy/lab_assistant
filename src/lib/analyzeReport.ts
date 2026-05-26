@@ -7,6 +7,7 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { cloudEnabled } from "@/lib/cloudMode";
 
 type Status = "low" | "normal" | "high";
 type MetricValue = { value: number; unit: string; status: Status } | null;
@@ -17,6 +18,15 @@ export interface AnalysisResult {
   risks: string[];
   possible_conditions: { name: string; confidence: number; rationale: string }[];
   findings?: { text: string; label: string | null; score: number | null }[];
+  ai_engine?: {
+    clinicalbert_used: boolean;
+    source: "edge-function" | "huggingface-direct" | "regex-only";
+    entities_detected: number;
+  };
+}
+
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // ── Regex-based value extraction ───────────────────────────────────────────
@@ -24,8 +34,9 @@ export interface AnalysisResult {
 function findValue(text: string, keys: string[]): number | null {
   // Robust search: check line-by-line for keyword + number pairs, and also try global patterns
   if (!text) return null;
-  const escapedKeys = keys.map(k => k.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&"));
+  const escapedKeys = keys.map((k) => escapeRegex(k));
   const keyPattern = escapedKeys.join("|");
+  const numPattern = "([0-9]+(?:\\.[0-9]+)?)(?!\\s*[-–]\\s*[0-9])";
 
   // normalize commas in numbers (e.g., 1,234.5)
   const normText = text.replace(/(\d),(?=\d{3}(?:\D|$))/g, "$1");
@@ -35,24 +46,46 @@ function findValue(text: string, keys: string[]): number | null {
     const l = line.toLowerCase();
     if (new RegExp(`\\b(?:${keyPattern})\\b`).test(l)) {
       // keyword before number
-      const m1 = l.match(new RegExp(`\\b(?:${keyPattern})\\b[^0-9\n]{0,60}([0-9]+(?:\\.[0-9]+)?)`));
+      const m1 = l.match(new RegExp(`\\b(?:${keyPattern})\\b[^0-9\\n]{0,40}${numPattern}`));
       if (m1) return parseFloat(m1[1]);
       // number before keyword on same line
-      const m2 = l.match(new RegExp(`([0-9]+(?:\\.[0-9]+)?)[^0-9\\n]{0,60}\\b(?:${keyPattern})\\b`));
+      const m2 = l.match(new RegExp(`${numPattern}[^0-9\\n]{0,40}\\b(?:${keyPattern})\\b`));
       if (m2) return parseFloat(m2[1]);
-      // any number on the line
-      const m3 = l.match(/([0-9]+(?:\.[0-9]+)?)/);
-      if (m3) return parseFloat(m3[1]);
     }
   }
 
   // Fallback global patterns
-  const g1 = normText.match(new RegExp(`\\b(?:${keyPattern})\\b[^0-9\n]{0,120}([0-9]+(?:\\.[0-9]+)?)`, "i"));
+  const g1 = normText.match(new RegExp(`\\b(?:${keyPattern})\\b[^0-9\\n]{0,50}${numPattern}`, "i"));
   if (g1) return parseFloat(g1[1]);
-  const g2 = normText.match(new RegExp(`([0-9]+(?:\\.[0-9]+)?)[^0-9\\n]{0,120}\\b(?:${keyPattern})\\b`, "i"));
+  const g2 = normText.match(new RegExp(`${numPattern}[^0-9\\n]{0,50}\\b(?:${keyPattern})\\b`, "i"));
   if (g2) return parseFloat(g2[1]);
 
   return null;
+}
+
+function normalizeWbc(v: number): number {
+  if (v > 200) return v / 1000;
+  if (v > 0 && v < 1) return v * 10;
+  return v;
+}
+
+function normalizePlatelets(v: number): number {
+  if (v > 10000) return v / 1000;
+  if (v > 0 && v < 50) return v * 10;
+  return v;
+}
+
+function normalizeGeneric(metric: string, v: number): number | null {
+  if (!Number.isFinite(v)) return null;
+  let x = v;
+  if (metric === "glucose" && x > 0 && x < 20) x *= 10;
+  if (metric === "hematocrit" && x > 0 && x < 10) x *= 10;
+  if (metric === "mcv" && x > 0 && x < 20) x *= 10;
+  if ((metric === "sodium" || metric === "chloride") && x > 0 && x < 40) x *= 10;
+  if (metric === "potassium" && x > 0 && x < 1) x *= 10;
+  if (metric === "creatinine" && x > 10) return null;
+  if (metric === "bilirubin" && x > 20) return null;
+  return x;
 }
 
 function extractValues(text: string): Record<string, MetricValue> {
@@ -62,7 +95,8 @@ function extractValues(text: string): Record<string, MetricValue> {
       return v == null ? null : { value: v, unit: "g/dL", status: (v < 12 ? "low" : v > 17.5 ? "high" : "normal") as Status };
     })(),
     wbc: (() => {
-      const v = findValue(text, ["wbc", "white blood cell", "white blood cells", "total wbc", "total leucocyte"]);
+      const raw = findValue(text, ["wbc", "white blood cell", "white blood cells", "total wbc", "total leucocyte"]);
+      const v = raw == null ? null : normalizeWbc(raw);
       return v == null ? null : { value: v, unit: "x10^9/L", status: (v < 4 ? "low" : v > 11 ? "high" : "normal") as Status };
     })(),
     rbc: (() => {
@@ -70,12 +104,108 @@ function extractValues(text: string): Record<string, MetricValue> {
       return v == null ? null : { value: v, unit: "10^12/L", status: (v < 4 ? "low" : v > 5.9 ? "high" : "normal") as Status };
     })(),
     platelets: (() => {
-      const v = findValue(text, ["platelets", "platelet", "platelet count"]);
+      const raw = findValue(text, ["platelets", "platelet", "platelet count"]);
+      const v = raw == null ? null : normalizePlatelets(raw);
       return v == null ? null : { value: v, unit: "10^9/L", status: (v < 150 ? "low" : v > 450 ? "high" : "normal") as Status };
     })(),
     glucose: (() => {
-      const v = findValue(text, ["glucose", "blood sugar", "fasting glucose", "random glucose"]);
+      const raw = findValue(text, ["glucose", "blood sugar", "fasting glucose", "random glucose"]);
+      const v = raw == null ? null : normalizeGeneric("glucose", raw);
       return v == null ? null : { value: v, unit: "mg/dL", status: (v < 70 ? "low" : v > 140 ? "high" : "normal") as Status };
+    })(),
+    hematocrit: (() => {
+      const raw = findValue(text, ["hematocrit", "hct", "pcv"]);
+      const v = raw == null ? null : normalizeGeneric("hematocrit", raw);
+      return v == null ? null : { value: v, unit: "%", status: (v < 36 ? "low" : v > 52 ? "high" : "normal") as Status };
+    })(),
+    mcv: (() => {
+      const raw = findValue(text, ["mcv", "mean corpuscular volume"]);
+      const v = raw == null ? null : normalizeGeneric("mcv", raw);
+      return v == null ? null : { value: v, unit: "fL", status: (v < 80 ? "low" : v > 100 ? "high" : "normal") as Status };
+    })(),
+    mch: (() => {
+      const v = findValue(text, ["mch", "mean corpuscular hemoglobin"]);
+      return v == null ? null : { value: v, unit: "pg", status: (v < 27 ? "low" : v > 33 ? "high" : "normal") as Status };
+    })(),
+    mchc: (() => {
+      const v = findValue(text, ["mchc", "mean corpuscular hemoglobin concentration"]);
+      return v == null ? null : { value: v, unit: "g/dL", status: (v < 32 ? "low" : v > 36 ? "high" : "normal") as Status };
+    })(),
+    neutrophils: (() => {
+      const v = findValue(text, ["neutrophils", "neutrophil"]);
+      return v == null ? null : { value: v, unit: "%", status: (v < 40 ? "low" : v > 75 ? "high" : "normal") as Status };
+    })(),
+    lymphocytes: (() => {
+      const v = findValue(text, ["lymphocytes", "lymphocyte"]);
+      return v == null ? null : { value: v, unit: "%", status: (v < 20 ? "low" : v > 45 ? "high" : "normal") as Status };
+    })(),
+    monocytes: (() => {
+      const v = findValue(text, ["monocytes", "monocyte"]);
+      return v == null ? null : { value: v, unit: "%", status: (v < 2 ? "low" : v > 10 ? "high" : "normal") as Status };
+    })(),
+    eosinophils: (() => {
+      const v = findValue(text, ["eosinophils", "eosinophil"]);
+      return v == null ? null : { value: v, unit: "%", status: (v < 1 ? "low" : v > 6 ? "high" : "normal") as Status };
+    })(),
+    basophils: (() => {
+      const v = findValue(text, ["basophils", "basophil"]);
+      return v == null ? null : { value: v, unit: "%", status: (v < 0 ? "low" : v > 2 ? "high" : "normal") as Status };
+    })(),
+    creatinine: (() => {
+      const raw = findValue(text, ["creatinine", "serum creatinine"]);
+      const v = raw == null ? null : normalizeGeneric("creatinine", raw);
+      return v == null ? null : { value: v, unit: "mg/dL", status: (v < 0.6 ? "low" : v > 1.3 ? "high" : "normal") as Status };
+    })(),
+    urea: (() => {
+      const v = findValue(text, ["urea", "blood urea"]);
+      return v == null ? null : { value: v, unit: "mg/dL", status: (v < 15 ? "low" : v > 40 ? "high" : "normal") as Status };
+    })(),
+    bun: (() => {
+      const v = findValue(text, ["bun", "blood urea nitrogen"]);
+      return v == null ? null : { value: v, unit: "mg/dL", status: (v < 7 ? "low" : v > 20 ? "high" : "normal") as Status };
+    })(),
+    sodium: (() => {
+      const raw = findValue(text, ["sodium", "na+"]);
+      const v = raw == null ? null : normalizeGeneric("sodium", raw);
+      return v == null ? null : { value: v, unit: "mmol/L", status: (v < 135 ? "low" : v > 145 ? "high" : "normal") as Status };
+    })(),
+    potassium: (() => {
+      const raw = findValue(text, ["potassium", "k+"]);
+      const v = raw == null ? null : normalizeGeneric("potassium", raw);
+      return v == null ? null : { value: v, unit: "mmol/L", status: (v < 3.5 ? "low" : v > 5.1 ? "high" : "normal") as Status };
+    })(),
+    chloride: (() => {
+      const raw = findValue(text, ["chloride", "cl-"]);
+      const v = raw == null ? null : normalizeGeneric("chloride", raw);
+      return v == null ? null : { value: v, unit: "mmol/L", status: (v < 98 ? "low" : v > 107 ? "high" : "normal") as Status };
+    })(),
+    calcium: (() => {
+      const v = findValue(text, ["calcium", "ca++"]);
+      return v == null ? null : { value: v, unit: "mg/dL", status: (v < 8.5 ? "low" : v > 10.5 ? "high" : "normal") as Status };
+    })(),
+    bilirubin: (() => {
+      const v = findValue(text, ["bilirubin", "total bilirubin"]);
+      return v == null ? null : { value: v, unit: "mg/dL", status: (v < 0.2 ? "low" : v > 1.2 ? "high" : "normal") as Status };
+    })(),
+    ast: (() => {
+      const v = findValue(text, ["ast", "sgot"]);
+      return v == null ? null : { value: v, unit: "U/L", status: (v < 10 ? "low" : v > 40 ? "high" : "normal") as Status };
+    })(),
+    alt: (() => {
+      const v = findValue(text, ["alt", "sgpt"]);
+      return v == null ? null : { value: v, unit: "U/L", status: (v < 7 ? "low" : v > 56 ? "high" : "normal") as Status };
+    })(),
+    alp: (() => {
+      const v = findValue(text, ["alp", "alkaline phosphatase"]);
+      return v == null ? null : { value: v, unit: "U/L", status: (v < 44 ? "low" : v > 147 ? "high" : "normal") as Status };
+    })(),
+    crp: (() => {
+      const v = findValue(text, ["crp", "c-reactive protein", "c reactive protein"]);
+      return v == null ? null : { value: v, unit: "mg/L", status: (v < 0 ? "low" : v > 5 ? "high" : "normal") as Status };
+    })(),
+    hba1c: (() => {
+      const v = findValue(text, ["hba1c", "glycated hemoglobin", "hemoglobin a1c"]);
+      return v == null ? null : { value: v, unit: "%", status: (v < 4 ? "low" : v > 5.6 ? "high" : "normal") as Status };
     })(),
   };
 }
@@ -134,6 +264,20 @@ function detectConditions(values: Record<string, MetricValue>): { name: string; 
       rationale: `High glucose (${values.glucose.value} ${values.glucose.unit}) — requires clinical confirmation`,
     });
   }
+  if (values.creatinine?.status === "high" || values.urea?.status === "high" || values.bun?.status === "high") {
+    conditions.push({
+      name: "Possible kidney function stress",
+      confidence: 28,
+      rationale: "Renal markers are above reference range — requires clinical confirmation",
+    });
+  }
+  if (values.alt?.status === "high" || values.ast?.status === "high" || values.bilirubin?.status === "high") {
+    conditions.push({
+      name: "Possible liver function abnormality",
+      confidence: 28,
+      rationale: "Liver-related markers are above reference range — requires clinical confirmation",
+    });
+  }
 
   return conditions;
 }
@@ -163,13 +307,70 @@ function buildSummary(values: Record<string, MetricValue>): string {
   return summary;
 }
 
+function looksLikeRadiologyReport(text: string): boolean {
+  const t = (text || "").toLowerCase();
+  const signals = ["impression", "observation", "technique", "appendix", "liver", "kidney", "ct "];
+  const score = signals.reduce((n, s) => n + (t.includes(s) ? 1 : 0), 0);
+  return score >= 3;
+}
+
+function buildRadiologySummary(text: string): {
+  summary: string;
+  risks: string[];
+  possible_conditions: { name: string; confidence: number; rationale: string }[];
+} {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const match = normalized.match(/impression[:\s-]+(.+)/i);
+  const block = match ? match[1] : normalized.slice(0, 1200);
+  const findings = block
+    .split(/(?:•|- )/g)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 8)
+    .slice(0, 6);
+  const selected = findings.length > 0 ? findings : [block.slice(0, 450)];
+
+  const risks: string[] = [];
+  const possible_conditions: { name: string; confidence: number; rationale: string }[] = [];
+  const joined = selected.join(" ").toLowerCase();
+
+  if (/no ct evidence of acute appendicitis|no evidence of acute appendicitis/.test(joined)) {
+    possible_conditions.push({
+      name: "No radiologic evidence of acute appendicitis",
+      confidence: 80,
+      rationale: "Impression explicitly states no CT evidence of appendicitis.",
+    });
+  }
+  if (/hepatomegaly|liver.*enlarged/.test(joined)) {
+    risks.push("Mild hepatomegaly");
+    possible_conditions.push({
+      name: "Possible hepatomegaly",
+      confidence: 65,
+      rationale: "Impression/observation indicates enlarged liver.",
+    });
+  }
+  if (/free fluid.*pouch of douglas/.test(joined)) {
+    risks.push("Mild pelvic free fluid");
+  }
+  if (risks.length === 0 && possible_conditions.length === 0) {
+    risks.push("Radiology findings present - requires clinician interpretation");
+  }
+
+  return {
+    summary: `Radiology impression extracted: ${selected.join(" | ")} Please review with your treating doctor for clinical correlation.`,
+    risks,
+    possible_conditions,
+  };
+}
+
 // ── ClinicalBERT HF API call (optional enrichment) ────────────────────────
 
 async function callClinicalBERT(text: string, apiKey: string): Promise<{ text: string; label: string | null; score: number | null }[]> {
   // Prefer calling the server-side Supabase Edge Function (or other backend) to avoid CORS when
   // running in the browser. The repo includes a Supabase function named `analyze-report`.
   try {
-    const useEdge = import.meta.env.VITE_USE_EDGE_FUNCTION === 'true' || import.meta.env.VITE_USE_SUPABASE_FUNCTION === 'true' || Boolean(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY);
+    const useEdge =
+      cloudEnabled() &&
+      (import.meta.env.VITE_USE_EDGE_FUNCTION === "true" || import.meta.env.VITE_USE_SUPABASE_FUNCTION === "true");
     if (useEdge) {
       try {
         const fnName = 'analyze-report';
@@ -190,26 +391,47 @@ async function callClinicalBERT(text: string, apiKey: string): Promise<{ text: s
     }
 
     // Fallback: direct HuggingFace inference API (may be blocked by CORS in browsers)
-    const HF_URL = "https://api-inference.huggingface.co/models/emilyalsentzer/Bio_ClinicalBERT";
+    const configuredUrl = import.meta.env.VITE_AI_GATEWAY_URL as string | undefined;
+    const fallbackUrls = [
+      "https://router.huggingface.co/hf-inference/models/d4data/biomedical-ner-all",
+      "https://router.huggingface.co/hf-inference/models/emilyalsentzer/Bio_ClinicalBERT",
+      "https://api-inference.huggingface.co/models/medicalai/ClinicalBERT",
+      "https://api-inference.huggingface.co/models/emilyalsentzer/Bio_ClinicalBERT",
+      // Reliable biomedical NER fallback when a ClinicalBERT endpoint does not expose token-classification output.
+      "https://api-inference.huggingface.co/models/d4data/biomedical-ner-all",
+    ];
+    const urlsToTry = [configuredUrl, ...fallbackUrls].filter((u, i, arr): u is string => !!u && arr.indexOf(u) === i);
     const truncated = text.slice(0, 2000);
 
-    const resp = await fetch(HF_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ inputs: truncated, options: { wait_for_model: true } }),
-    });
+    for (const url of urlsToTry) {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ inputs: truncated, options: { wait_for_model: true } }),
+      });
 
-    if (!resp.ok) {
-      console.warn("ClinicalBERT API returned non-OK status:", resp.status);
-      return [];
+      if (!resp.ok) {
+        console.warn("ClinicalBERT API returned non-OK status:", resp.status, "for", url);
+        continue;
+      }
+
+      const data = await resp.json();
+      const entities = Array.isArray(data) ? data : data?.[0] ? data[0] : [];
+      const normalized = (entities || [])
+        .map((e: any) => ({
+          text: e.word || e.token || e.entity || e.label || "",
+          label: e.entity_group || e.entity || e.label || null,
+          score: e.score || e.confidence || null,
+        }))
+        .filter((e: any) => !!e.text);
+
+      if (normalized.length > 0) return normalized;
     }
 
-    const data = await resp.json();
-    const entities = Array.isArray(data) ? data : data?.[0] ? data[0] : [];
-    return (entities || []).map((e: any) => ({ text: e.word || e.token || e.entity || e.label || "", label: e.entity_group || e.entity || e.label || null, score: e.score || e.confidence || null }));
+    return [];
   } catch (err) {
     console.warn("ClinicalBERT API call failed (will continue with regex-only analysis):", err);
     return [];
@@ -224,20 +446,21 @@ export async function analyzeReport(rawText: string, fileName: string): Promise<
   // 1. Extract numeric values via regex
   const values = extractValues(text);
 
-  // 2. Detect possible conditions based on extracted values
-  const possible_conditions = detectConditions(values);
-
-  // 3. Build human-readable summary
-  const summary = buildSummary(values);
-
-  // 4. Build risks array
-  const risks = possible_conditions.map((c) => c.name);
-
   // 5. Optionally call ClinicalBERT for entity enrichment
   const apiKey = import.meta.env.VITE_AI_GATEWAY_KEY;
   let findings: { text: string; label: string | null; score: number | null }[] = [];
+  let aiEngine: AnalysisResult["ai_engine"] = {
+    clinicalbert_used: false,
+    source: "regex-only",
+    entities_detected: 0,
+  };
   if (apiKey && text.trim().length > 0) {
     findings = await callClinicalBERT(text, apiKey);
+    aiEngine = {
+      clinicalbert_used: findings.length > 0,
+      source: findings.length > 0 ? "huggingface-direct" : "regex-only",
+      entities_detected: findings.length,
+    };
 
     // Entity-guided fallback: use the improved findValue to extract numbers near detected entity labels
     const mapEntityToKeys: Record<string, string[]> = {
@@ -271,5 +494,22 @@ export async function analyzeReport(rawText: string, fileName: string): Promise<
 
   console.log(`[analyzeReport] File: ${fileName} | ClinicalBERT entities: ${findings.length} | Extracted values:`, values);
 
-  return { values, summary, risks, possible_conditions, findings };
+  const hasAnyLabValue = Object.values(values).some((v) => !!v);
+  if (looksLikeRadiologyReport(text) && !hasAnyLabValue) {
+    const radiology = buildRadiologySummary(text);
+    return {
+      values,
+      summary: radiology.summary,
+      risks: radiology.risks,
+      possible_conditions: radiology.possible_conditions,
+      findings,
+      ai_engine: aiEngine,
+    };
+  }
+
+  const possible_conditions = detectConditions(values);
+  const summary = buildSummary(values);
+  const risks = possible_conditions.map((c) => c.name);
+
+  return { values, summary, risks, possible_conditions, findings, ai_engine: aiEngine };
 }
