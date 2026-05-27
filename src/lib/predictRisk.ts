@@ -7,7 +7,7 @@
 
 type Status = "low" | "normal" | "high";
 type Metric = { value?: number; unit?: string; status?: Status };
-type Values = Record<string, Metric>;
+type Values = Record<string, Metric | null>;
 
 export interface PredictionResult {
   risk_level: "Normal" | "Mild Risk" | "High Risk";

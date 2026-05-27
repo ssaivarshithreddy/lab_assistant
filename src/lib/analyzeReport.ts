@@ -11,12 +11,13 @@ import { cloudEnabled } from "@/lib/cloudMode";
 
 type Status = "low" | "normal" | "high";
 type MetricValue = { value: number; unit: string; status: Status } | null;
+type PossibleCondition = { name: string; confidence: number; rationale: string };
 
 export interface AnalysisResult {
   values: Record<string, MetricValue>;
   summary: string;
   risks: string[];
-  possible_conditions: { name: string; confidence: number; rationale: string }[];
+  possible_conditions: PossibleCondition[];
   findings?: { text: string; label: string | null; score: number | null }[];
   ai_engine?: {
     clinicalbert_used: boolean;
@@ -45,20 +46,25 @@ function findValue(text: string, keys: string[]): number | null {
   for (const line of lines) {
     const l = line.toLowerCase();
     if (new RegExp(`\\b(?:${keyPattern})\\b`).test(l)) {
-      // keyword before number
-      const m1 = l.match(new RegExp(`\\b(?:${keyPattern})\\b[^0-9\\n]{0,40}${numPattern}`));
+      // keyword before number (colon, space, tab)
+      const m1 = l.match(new RegExp(`\\b(?:${keyPattern})\\b\\s*[:=]?\\s*${numPattern}`));
       if (m1) return parseFloat(m1[1]);
-      // number before keyword on same line
-      const m2 = l.match(new RegExp(`${numPattern}[^0-9\\n]{0,40}\\b(?:${keyPattern})\\b`));
+      // keyword before number with flexible spacing
+      const m2 = l.match(new RegExp(`\\b(?:${keyPattern})\\b[^0-9\\n]{0,50}${numPattern}`));
       if (m2) return parseFloat(m2[1]);
+      // number before keyword on same line
+      const m3 = l.match(new RegExp(`${numPattern}[^0-9\\n]{0,40}\\b(?:${keyPattern})\\b`));
+      if (m3) return parseFloat(m3[1]);
     }
   }
 
-  // Fallback global patterns
-  const g1 = normText.match(new RegExp(`\\b(?:${keyPattern})\\b[^0-9\\n]{0,50}${numPattern}`, "i"));
+  // Fallback global patterns (increased range)
+  const g1 = normText.match(new RegExp(`\\b(?:${keyPattern})\\b\\s*[:=]?\\s*${numPattern}`, "i"));
   if (g1) return parseFloat(g1[1]);
-  const g2 = normText.match(new RegExp(`${numPattern}[^0-9\\n]{0,50}\\b(?:${keyPattern})\\b`, "i"));
+  const g2 = normText.match(new RegExp(`\\b(?:${keyPattern})\\b[^0-9\\n]{0,80}${numPattern}`, "i"));
   if (g2) return parseFloat(g2[1]);
+  const g3 = normText.match(new RegExp(`${numPattern}[^0-9\\n]{0,80}\\b(?:${keyPattern})\\b`, "i"));
+  if (g3) return parseFloat(g3[1]);
 
   return null;
 }
@@ -212,8 +218,8 @@ function extractValues(text: string): Record<string, MetricValue> {
 
 // ── Rule-based condition detection ─────────────────────────────────────────
 
-function detectConditions(values: Record<string, MetricValue>): { name: string; confidence: number; rationale: string }[] {
-  const conditions: { name: string; confidence: number; rationale: string }[] = [];
+function detectConditions(values: Record<string, MetricValue>): PossibleCondition[] {
+  const conditions: PossibleCondition[] = [];
 
   if (values.hemoglobin?.status === "low") {
     conditions.push({
@@ -309,15 +315,66 @@ function buildSummary(values: Record<string, MetricValue>): string {
 
 function looksLikeRadiologyReport(text: string): boolean {
   const t = (text || "").toLowerCase();
-  const signals = ["impression", "observation", "technique", "appendix", "liver", "kidney", "ct "];
+  const signals = ["impression", "observation", "technique", "appendix", "liver", "kidney", "ct ", "x-ray", "xray", "mri", "ultrasound", "sonography"];
   const score = signals.reduce((n, s) => n + (t.includes(s) ? 1 : 0), 0);
   return score >= 3;
+}
+
+function looksLikeHealthReport(text: string): boolean {
+  const t = (text || "").toLowerCase();
+  const signals = [
+    "patient", "doctor", "dr.", "hospital", "clinic", "diagnosis", "diagnoses", "impression",
+    "findings", "observation", "procedure", "treatment", "advice", "medication", "prescription",
+    "history", "symptoms", "follow up", "follow-up", "discharge", "specimen", "biopsy",
+    "pathology", "histopathology", "cytology", "microscopy", "gross", "clinical details",
+  ];
+  const score = signals.reduce((n, s) => n + (t.includes(s) ? 1 : 0), 0);
+  return score >= 2;
+}
+
+function cleanSnippet(text: string, max = 360): string {
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.;:])/g, "$1")
+    .trim()
+    .slice(0, max)
+    .trim();
+}
+
+function extractSection(text: string, labels: string[], max = 500): string | null {
+  const normalized = text.replace(/\r/g, "\n").replace(/[ \t]+/g, " ");
+  const headers = [
+    "impression", "conclusion", "diagnosis", "diagnoses", "findings", "observation", "observations",
+    "microscopy", "gross", "clinical details", "history", "procedure", "treatment", "advice",
+    "medication", "medications", "prescription", "follow up", "follow-up", "remarks", "comment",
+  ];
+  const labelPattern = labels.map(escapeRegex).join("|");
+  const stopPattern = headers.filter((h) => !labels.includes(h)).map(escapeRegex).join("|");
+  const pattern = new RegExp(`(?:^|\\n|\\b)(?:${labelPattern})\\s*[:\\-]?\\s*(.*?)(?=(?:\\n|\\b)(?:${stopPattern})\\s*[:\\-]|$)`, "is");
+  const match = normalized.match(pattern);
+  const value = match?.[1] ? cleanSnippet(match[1], max) : null;
+  return value && value.length > 12 ? value : null;
+}
+
+function extractLikelyFindings(text: string): string[] {
+  const normalized = text.replace(/\r/g, "\n");
+  const lines = normalized
+    .split(/\n| {2,}/)
+    .map((line) => cleanSnippet(line, 260))
+    .filter((line) => line.length >= 18);
+
+  const findingSignals = /(diagnosis|impression|finding|observation|positive|negative|detected|seen|noted|suggestive|consistent|compatible|evidence|lesion|mass|infection|inflammation|fracture|normal|abnormal|biopsy|specimen|microscopy|histopathology|cytology|clinical)/i;
+  const boilerplate = /(registered|invoice|phone|email|address|page \d+|sample collected|report printed|authorized|signature|barcode)/i;
+
+  return lines
+    .filter((line) => findingSignals.test(line) && !boilerplate.test(line))
+    .slice(0, 6);
 }
 
 function buildRadiologySummary(text: string): {
   summary: string;
   risks: string[];
-  possible_conditions: { name: string; confidence: number; rationale: string }[];
+  possible_conditions: PossibleCondition[];
 } {
   const normalized = text.replace(/\s+/g, " ").trim();
   const match = normalized.match(/impression[:\s-]+(.+)/i);
@@ -357,6 +414,42 @@ function buildRadiologySummary(text: string): {
 
   return {
     summary: `Radiology impression extracted: ${selected.join(" | ")} Please review with your treating doctor for clinical correlation.`,
+    risks,
+    possible_conditions,
+  };
+}
+
+function buildHealthReportSummary(text: string, fileName: string): {
+  summary: string;
+  risks: string[];
+  possible_conditions: PossibleCondition[];
+} {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const reportKind =
+    /pathology|histopathology|biopsy|cytology|specimen|microscopy/i.test(text) ? "Pathology report" :
+    looksLikeRadiologyReport(text) ? "Radiology report" :
+    /prescription|medication|advice|follow[- ]?up/i.test(text) ? "Clinical note or prescription" :
+    "Health report";
+
+  const sections = [
+    extractSection(text, ["diagnosis", "diagnoses", "impression", "conclusion"], 520),
+    extractSection(text, ["findings", "observation", "observations", "microscopy"], 520),
+    extractSection(text, ["clinical details", "history", "procedure"], 360),
+    extractSection(text, ["advice", "treatment", "medication", "medications", "prescription", "follow up", "follow-up"], 420),
+  ].filter((s): s is string => Boolean(s));
+
+  const findings = sections.length > 0 ? sections : extractLikelyFindings(text);
+  const selected = findings.length > 0 ? findings.slice(0, 6) : [cleanSnippet(normalized, 700)];
+  const risks: string[] = selected.length > 0 ? selected.slice(0, 4) : ["Health report text extracted - clinician interpretation required"];
+
+  const possible_conditions: PossibleCondition[] = selected.slice(0, 4).map((finding, index) => ({
+    name: index === 0 ? `${reportKind} finding` : `Additional finding ${index + 1}`,
+    confidence: 65,
+    rationale: finding,
+  }));
+
+  return {
+    summary: `${reportKind} analyzed from ${fileName || "uploaded file"}. Key extracted information: ${selected.join(" | ")} Please review this with a qualified healthcare professional for diagnosis, treatment decisions, and clinical correlation.`,
     risks,
     possible_conditions,
   };
@@ -495,13 +588,25 @@ export async function analyzeReport(rawText: string, fileName: string): Promise<
   console.log(`[analyzeReport] File: ${fileName} | ClinicalBERT entities: ${findings.length} | Extracted values:`, values);
 
   const hasAnyLabValue = Object.values(values).some((v) => !!v);
-  if (looksLikeRadiologyReport(text) && !hasAnyLabValue) {
+  if (!hasAnyLabValue && looksLikeRadiologyReport(text)) {
     const radiology = buildRadiologySummary(text);
     return {
       values,
       summary: radiology.summary,
       risks: radiology.risks,
       possible_conditions: radiology.possible_conditions,
+      findings,
+      ai_engine: aiEngine,
+    };
+  }
+
+  if (!hasAnyLabValue && looksLikeHealthReport(text)) {
+    const healthReport = buildHealthReportSummary(text, fileName);
+    return {
+      values,
+      summary: healthReport.summary,
+      risks: healthReport.risks,
+      possible_conditions: healthReport.possible_conditions,
       findings,
       ai_engine: aiEngine,
     };
