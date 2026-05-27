@@ -24,12 +24,15 @@ export async function runAiConnectivityTest(): Promise<ConnectivityReport> {
   const supabaseKey = getEnv("VITE_SUPABASE_PUBLISHABLE_KEY");
   const hfUrl = getEnv("VITE_AI_GATEWAY_URL");
   const hfKey = getEnv("VITE_AI_GATEWAY_KEY");
+  const groqKey = getEnv("VITE_GROQ_API_KEY");
 
   checks.push({
     name: "Environment variables",
-    ok: Boolean(supabaseUrl && supabaseKey && hfUrl && hfKey),
-    details: !supabaseUrl || !supabaseKey || !hfUrl || !hfKey
-      ? "Missing one or more of VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY, VITE_AI_GATEWAY_URL, VITE_AI_GATEWAY_KEY."
+    ok: Boolean(groqKey || (supabaseUrl && supabaseKey && hfUrl && hfKey)),
+    details: groqKey
+      ? "Groq API key is configured ✓"
+      : !supabaseUrl || !supabaseKey || !hfUrl || !hfKey
+      ? "Missing env vars: Need either GROQ_API_KEY or (SUPABASE_URL + SUPABASE_PUBLISHABLE_KEY + AI_GATEWAY_URL + AI_GATEWAY_KEY)."
       : "All required env vars are present.",
   });
 
@@ -142,6 +145,55 @@ export async function runAiConnectivityTest(): Promise<ConnectivityReport> {
       ok: false,
       details: `All HF endpoints failed: ${hfErrors.join(" | ").slice(0, 500)}`,
     });
+  }
+
+  // Test Groq connectivity
+  if (groqKey) {
+    try {
+      const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${groqKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages: [{ role: "user", content: "Reply with: OK" }],
+          max_tokens: 10,
+          stream: false,
+        }),
+      });
+
+      const ctype = resp.headers.get("content-type") || "";
+      if (!resp.ok) {
+        const text = await resp.text();
+        checks.push({
+          name: "Groq API (llama-3.3-70b-versatile)",
+          ok: false,
+          details: `HTTP ${resp.status}: ${text.slice(0, 250)}`,
+        });
+      } else if (ctype.includes("application/json")) {
+        const data = await resp.json().catch(() => ({}));
+        const hasContent = Boolean(data.choices?.[0]?.message?.content);
+        checks.push({
+          name: "Groq API (llama-3.3-70b-versatile)",
+          ok: hasContent,
+          details: hasContent ? "✓ Groq API is fully operational" : "Groq responded but no message content",
+        });
+      } else {
+        checks.push({
+          name: "Groq API (llama-3.3-70b-versatile)",
+          ok: false,
+          details: `Unexpected response type: ${ctype}`,
+        });
+      }
+    } catch (e: any) {
+      checks.push({
+        name: "Groq API (llama-3.3-70b-versatile)",
+        ok: false,
+        details: `Request failed: ${String(e?.message || e)}`,
+      });
+    }
   }
 
   return {

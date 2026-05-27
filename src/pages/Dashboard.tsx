@@ -1,38 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { Activity, AlertTriangle, ArrowRight, CheckCircle2, MessageSquareHeart, TrendingDown, TrendingUp } from "lucide-react";
+import { Activity, AlertTriangle, ArrowRight, CheckCircle2, Loader2, MessageSquareHeart, Trash2, TrendingDown, TrendingUp } from "lucide-react";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { cloudEnabled } from "@/lib/cloudMode";
-import { getLocalReports } from "@/lib/localReports";
+import { deleteLocalReport, getLocalReports } from "@/lib/localReports";
 import { cn } from "@/lib/utils";
-
-type ValueObj = { value?: number; unit?: string; status?: "low" | "normal" | "high" };
-type Prediction = {
-  risk_level?: "Normal" | "Mild Risk" | "High Risk";
-  abnormal_parameters?: string[];
-  insights?: string[];
-  score?: number;
-  confidence?: number;
-  ai_engine?: {
-    clinicalbert_used?: boolean;
-    source?: string;
-    entities_detected?: number;
-  };
-};
-type ReportRow = {
-  id: string;
-  file_name: string;
-  created_at: string;
-  summary: string | null;
-  values: Record<string, ValueObj> | null;
-  prediction: Prediction | null;
-};
+import type { ValueObj, ReportData } from "@/types/report";
 
 const METRICS: { key: string; label: string }[] = [
   { key: "hemoglobin", label: "Hemoglobin" },
@@ -70,17 +62,58 @@ const statusStyle = {
   high: "bg-destructive-soft text-destructive border-destructive/20",
 } as const;
 
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function valuesFromSummary(summary: string | null | undefined): Record<string, ValueObj> {
+  if (!summary) return {};
+
+  return METRICS.reduce<Record<string, ValueObj>>((acc, metric) => {
+    const names = [metric.label, metric.key];
+    const namePattern = names.map(escapeRegex).join("|");
+    const match = summary.match(
+      new RegExp(`(?:${namePattern})\\s*:\\s*(-?\\d+(?:\\.\\d+)?)\\s*([^;()]*?)\\s*\\((low|normal|high)\\)`, "i")
+    );
+
+    if (match) {
+      acc[metric.key] = {
+        value: Number(match[1]),
+        unit: match[2].trim() || undefined,
+        status: match[3].toLowerCase() as ValueObj["status"],
+      };
+    }
+
+    return acc;
+  }, {});
+}
+
+function displayValues(report: Pick<ReportData, "summary" | "values">): Record<string, ValueObj> {
+  const merged = valuesFromSummary(report.summary);
+
+  Object.entries(report.values ?? {}).forEach(([key, value]) => {
+    if (value?.value != null) merged[key] = value;
+  });
+
+  return merged;
+}
+
+function isLocalReport(report: ReportData): boolean {
+  return report.local_only === true || report.id.startsWith("local_");
+}
+
 const Dashboard = () => {
   const { user } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
-  const [reports, setReports] = useState<ReportRow[]>([]);
+  const [reports, setReports] = useState<ReportData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      let cloudRows: ReportRow[] = [];
+      let cloudRows: ReportData[] = [];
       let cloudOk = false;
       if (cloudEnabled()) {
         try {
@@ -90,7 +123,7 @@ const Dashboard = () => {
             .eq("user_id", user?.id ?? "")
             .order("created_at", { ascending: false });
           if (error) throw error;
-          cloudRows = (data ?? []) as ReportRow[];
+          cloudRows = (data ?? []) as ReportData[];
           cloudOk = true;
         } catch (e) {
           console.warn("Cloud reports unavailable, using local reports only:", e);
@@ -100,7 +133,7 @@ const Dashboard = () => {
       // Use local cache only when cloud is unavailable.
       const rows = cloudOk
         ? cloudRows
-        : (getLocalReports(user?.id) as unknown as ReportRow[]).sort(
+        : (getLocalReports(user?.id) as unknown as ReportData[]).sort(
             (a, b) => +new Date(b.created_at) - +new Date(a.created_at)
           );
 
@@ -116,7 +149,7 @@ const Dashboard = () => {
     return [...reports]
       .reverse()
       .map((r) => {
-        const v = r.values ?? {};
+        const v = displayValues(r);
         return {
           date: new Date(r.created_at).toLocaleDateString(),
           hemoglobin: v.hemoglobin?.value,
@@ -145,11 +178,50 @@ const Dashboard = () => {
     );
   }
 
-  const values = current.values ?? {};
+  const values = displayValues(current);
+  const detectedMetricCount = METRICS.filter((m) => values[m.key]?.value != null).length;
   const abnormalCount = METRICS.filter((m) => {
     const s = values[m.key]?.status;
     return s === "low" || s === "high";
   }).length;
+
+  const deleteCurrentReport = async () => {
+    if (!current || deleting) return;
+
+    setDeleting(true);
+    try {
+      if (isLocalReport(current) || !cloudEnabled()) {
+        deleteLocalReport(current.id, user?.id);
+      } else {
+        if (current.file_path) {
+          const { error: storageError } = await supabase.storage.from("lab-reports").remove([current.file_path]);
+          if (storageError) console.warn("Storage file delete failed; deleting report row anyway:", storageError);
+        }
+
+        const { error } = await supabase
+          .from("reports")
+          .delete()
+          .eq("id", current.id)
+          .eq("user_id", user?.id ?? "");
+        if (error) throw error;
+      }
+
+      const remaining = reports.filter((r) => r.id !== current.id);
+      setReports(remaining);
+      toast.success("Report removed.");
+
+      if (remaining[0]) {
+        navigate(`/dashboard/${remaining[0].id}`, { replace: true });
+      } else {
+        navigate("/dashboard", { replace: true });
+      }
+    } catch (error) {
+      console.error("Delete report failed:", error);
+      toast.error("Could not remove this report. Please try again.");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -160,11 +232,40 @@ const Dashboard = () => {
             {current.file_name} · {new Date(current.created_at).toLocaleString()}
           </p>
         </div>
-        <Button asChild className="bg-gradient-primary">
-          <Link to={`/assistant/${current.id}`}>
-            <MessageSquareHeart className="mr-2 h-4 w-4" /> Ask the AI assistant
-          </Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild className="bg-gradient-primary">
+            <Link to={`/assistant/${current.id}`}>
+              <MessageSquareHeart className="mr-2 h-4 w-4" /> Ask the AI assistant
+            </Link>
+          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" className="border-destructive/30 text-destructive hover:bg-destructive-soft" disabled={deleting}>
+                {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                Remove report
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove this report?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This removes the uploaded file attachment when available and deletes this report from your dashboard.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  disabled={deleting}
+                  onClick={() => void deleteCurrentReport()}
+                >
+                  {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                  Remove
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
       </div>
 
       {reports.length > 1 && (
@@ -184,37 +285,55 @@ const Dashboard = () => {
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {METRICS.map((m) => {
-          const v = values[m.key];
-          const status = v?.status ?? "normal";
-          const Icon = status === "high" ? TrendingUp : status === "low" ? TrendingDown : CheckCircle2;
-          return (
-            <Card key={m.key} className="shadow-card">
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center justify-between text-sm font-medium text-muted-foreground">
-                  {m.label}
-                  <Activity className="h-4 w-4" />
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {v?.value != null ? (
-                  <>
-                    <div className="text-2xl font-bold">
-                      {v.value} <span className="text-sm font-normal text-muted-foreground">{v.unit}</span>
-                    </div>
-                    <Badge variant="outline" className={cn("mt-2 capitalize", statusStyle[status])}>
-                      <Icon className="mr-1 h-3 w-3" /> {status}
-                    </Badge>
-                  </>
-                ) : (
-                  <div className="text-sm text-muted-foreground">Not detected</div>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+      {detectedMetricCount > 0 ? (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {METRICS.map((m) => {
+            const v = values[m.key];
+            const status = v?.status ?? "normal";
+            const Icon = status === "high" ? TrendingUp : status === "low" ? TrendingDown : CheckCircle2;
+            return (
+              <Card key={m.key} className="shadow-card">
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center justify-between text-sm font-medium text-muted-foreground">
+                    {m.label}
+                    <Activity className="h-4 w-4" />
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {v?.value != null ? (
+                    <>
+                      <div className="text-2xl font-bold">
+                        {v.value} <span className="text-sm font-normal text-muted-foreground">{v.unit}</span>
+                      </div>
+                      <Badge variant="outline" className={cn("mt-2 capitalize", statusStyle[status])}>
+                        <Icon className="mr-1 h-3 w-3" /> {status}
+                      </Badge>
+                    </>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">Not detected</div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      ) : (
+        <Card className="shadow-card">
+          <CardContent className="p-5">
+            <div className="flex items-start gap-3">
+              <Activity className="mt-0.5 h-5 w-5 text-primary" />
+              <div>
+                <div className="font-medium">General health report analyzed</div>
+                <p className="text-sm text-muted-foreground">
+                  No standard lab metric cards were detected, so the result is summarized from the report text below.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <MedicalDisclaimer />
 
       <Card className="shadow-card">
         <CardHeader>
@@ -302,8 +421,10 @@ const Dashboard = () => {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {abnormalCount === 0 ? (
-              <p className="text-sm text-muted-foreground">All detected values are within normal range. 🎉</p>
+            {detectedMetricCount === 0 ? (
+              <p className="text-sm text-muted-foreground">No standard lab risk indicators were detected. Review the AI summary for report findings.</p>
+            ) : abnormalCount === 0 ? (
+              <p className="text-sm text-muted-foreground">All detected values are within normal range.</p>
             ) : (
               <ul className="space-y-2 text-sm">
                 {METRICS.filter((m) => ["low", "high"].includes(values[m.key]?.status ?? "")).map((m) => (

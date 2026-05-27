@@ -13,6 +13,47 @@ import { predictRisk } from "@/lib/predictRisk";
 import { createLocalReport } from "@/lib/localReports";
 import { cloudEnabled } from "@/lib/cloudMode";
 import { cn } from "@/lib/utils";
+import type { PredictionData, ValueObj } from "@/types/report";
+
+type ExtractedValues = Record<string, ValueObj | null>;
+type StoredValues = Record<string, ValueObj>;
+type StoredPrediction = PredictionData & { disclaimer?: string };
+const STANDARD_STORAGE_MAX_BYTES = 6 * 1024 * 1024;
+const STORAGE_UPLOAD_TIMEOUT_MS = 45_000;
+const REPORT_SAVE_TIMEOUT_MS = 30_000;
+
+function mergeAnalysisValues(
+  analysisValues: ExtractedValues | null | undefined,
+  enrichedValues: ExtractedValues | null | undefined
+): StoredValues {
+  const merged: StoredValues = {};
+
+  Object.entries(analysisValues ?? {}).forEach(([key, value]) => {
+    if (value?.value != null) merged[key] = value;
+  });
+  Object.entries(enrichedValues ?? {}).forEach(([key, value]) => {
+    if (value?.value != null) merged[key] = value;
+  });
+
+  return merged;
+}
+
+function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
 
 const Upload = () => {
   const { user } = useAuth();
@@ -51,11 +92,9 @@ const Upload = () => {
       setStage("Extracting text (OCR/text extraction)...");
       setProgress(5);
 
-      // Start upload in parallel to save wall clock time; we'll await its completion before saving report.
       if (!user) throw new Error("You must be signed in to analyze reports.");
       const path = `${user.id}/${crypto.randomUUID()}-${file.name}`;
       const useCloud = cloudEnabled();
-      const uploadPromise = useCloud ? supabase.storage.from("lab-reports").upload(path, file) : null;
 
       // Extract text (may be CPU-heavy). Progress updates come from extractTextFromFile.
       const rawText = await extractTextFromFile(file, (m) => {
@@ -73,17 +112,30 @@ const Upload = () => {
       setProgress(75);
 
       // ── Run risk prediction locally ──
-      const ml = predictRisk(ai.values as any);
+      const ml = predictRisk(ai.values);
       console.log("ML predict-risk response:", ml);
+      const reportValues = mergeAnalysisValues(ai.values, ml?.enriched_values);
+      const hasLabValues = Object.values(reportValues).some((value) => value?.value != null);
+      const reportPrediction: StoredPrediction = hasLabValues
+        ? { ...ml, ai_engine: ai.ai_engine ?? undefined }
+        : {
+            risk_level: ai.risks.length > 0 ? "Mild Risk" : "Normal",
+            abnormal_parameters: [],
+            insights: ai.risks.length > 0 ? ai.risks : ["Health report analyzed. No standard lab metrics were detected."],
+            score: 0,
+            confidence: 0.65,
+            disclaimer: "This is not medical advice.",
+            ai_engine: ai.ai_engine ?? undefined,
+          };
 
       if (!useCloud) {
         const localReport = createLocalReport({
           file_name: file.name,
           file_path: path,
           raw_text: rawText,
-          values: (ml?.enriched_values ?? ai.values ?? {}) as any,
+          values: reportValues,
           summary: ai.summary ?? "",
-          prediction: { ...(ml ?? {}), ai_engine: ai.ai_engine ?? null } as any,
+          prediction: reportPrediction,
         }, user.id);
         setProgress(100);
         toast.success("Report analyzed in local mode.");
@@ -94,38 +146,67 @@ const Upload = () => {
       // Ensure upload finished (or surface upload error)
       setStage("Uploading file to storage...");
       setProgress(85);
-      const { error: upErr } = await uploadPromise!;
       let cloudFilePath: string | null = path;
-      if (upErr) {
-        console.error("Upload error:", upErr);
+      if (file.size > STANDARD_STORAGE_MAX_BYTES) {
         cloudFilePath = null;
-        toast.warning("Storage upload failed. Saving report in cloud DB without file attachment.");
+        toast.warning("Large PDF analyzed. Saving report data without file attachment.");
+      } else {
+        try {
+          const { error: upErr } = await withTimeout(
+            supabase.storage.from("lab-reports").upload(path, file, {
+              contentType: file.type || undefined,
+              upsert: false,
+            }),
+            STORAGE_UPLOAD_TIMEOUT_MS,
+            "Storage upload timed out."
+          );
+
+          if (upErr) throw upErr;
+        } catch (uploadError) {
+          console.error("Upload error:", uploadError);
+          cloudFilePath = null;
+          toast.warning("Storage upload failed or timed out. Saving report data without file attachment.");
+        }
       }
 
       setStage("Saving report metadata...");
       setProgress(92);
-      const { data: report, error: insErr } = await supabase
-        .from("reports")
-        .insert({
-          file_name: file.name,
-          user_id: user.id,
-          file_path: cloudFilePath,
-          raw_text: rawText,
-          values: (ml?.enriched_values ?? ai.values ?? {}) as any,
-          summary: ai.summary ?? "",
-          prediction: { ...(ml ?? {}), ai_engine: ai.ai_engine ?? null } as any,
-        })
-        .select()
-        .single();
+      let report: { id: string } | null = null;
+      let insertError: unknown = null;
+      try {
+        const insertResult = await withTimeout(
+          supabase
+            .from("reports")
+            .insert({
+              file_name: file.name,
+              user_id: user.id,
+              file_path: cloudFilePath,
+              raw_text: rawText,
+              values: reportValues,
+              summary: ai.summary ?? "",
+              prediction: reportPrediction,
+            })
+            .select("id")
+            .single(),
+          REPORT_SAVE_TIMEOUT_MS,
+          "Saving report metadata timed out."
+        );
+        report = insertResult.data;
+        insertError = insertResult.error;
+      } catch (error) {
+        insertError = error;
+      }
+
+      const insErr = insertError || (!report ? new Error("Report metadata save returned no report id.") : null);
       if (insErr) {
         console.error("Insert error:", insErr);
         const localReport = createLocalReport({
           file_name: file.name,
           file_path: path,
           raw_text: rawText,
-          values: (ml?.enriched_values ?? ai.values ?? {}) as any,
+          values: reportValues,
           summary: ai.summary ?? "",
-          prediction: { ...(ml ?? {}), ai_engine: ai.ai_engine ?? null } as any,
+          prediction: reportPrediction,
         }, user.id);
         toast.warning("Cloud database unavailable. Report saved locally in this browser.");
         navigate(`/dashboard/${localReport.id}`);
@@ -139,13 +220,14 @@ const Upload = () => {
       setProgress(100);
       toast.success("Report analyzed!");
       navigate(`/dashboard/${report.id}`);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      const msg = String(e?.message || "");
+      const message = e instanceof Error ? e.message : "Something went wrong";
+      const msg = String(message || "");
       if (/failed to fetch/i.test(msg)) {
         toast.error("Network request failed. Check internet/Supabase connection and try again.");
       } else {
-        toast.error(e.message || "Something went wrong");
+        toast.error(message);
       }
     } finally {
       setBusy(false);

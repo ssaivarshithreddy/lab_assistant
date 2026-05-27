@@ -61,3 +61,10 @@ export function createLocalReport(
   write(rows.slice(0, 50), userId);
   return report;
 }
+
+export function deleteLocalReport(id: string, userId?: string | null): boolean {
+  const rows = read(userId);
+  const nextRows = rows.filter((r) => r.id !== id);
+  write(nextRows, userId);
+  return nextRows.length !== rows.length;
+}
