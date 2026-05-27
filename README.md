@@ -10,7 +10,7 @@ The app is functional for core flows (auth, report upload, analysis, dashboard, 
 
 LabSense is a full-stack health-tech web application that helps users:
 
-- upload lab/radiology reports (PDF/images),
+- upload lab, radiology, pathology, prescription, and other health reports (PDF/images),
 - extract report text with PDF parsing + OCR,
 - generate structured insights,
 - view report history and trends,
@@ -37,10 +37,12 @@ The platform is built as a modern SaaS-style app using Supabase for authenticati
 - Session persistence and route protection
 - User profile auto-creation (`profiles` table)
 - Report upload and secure storage pathing per user
-- Report analysis pipeline (deterministic parsing + optional model enrichment)
+- Report analysis pipeline for lab metrics and general health-report findings
+- Radiology/pathology/clinical-note summary fallback when standard lab metrics are not present
 - Dashboard with metric cards, summary, risks, and trend chart
 - AI assistant with cloud mode + robust local fallback responses
 - AI connectivity diagnostics tool
+- Report removal from dashboard, including stored file cleanup when available
 
 ## Architecture Summary
 
@@ -185,21 +187,24 @@ This includes:
 
 3. **Analyze**
    - Deterministic parser extracts metrics when applicable.
-   - Radiology narrative handling path for non-tabular reports.
+   - Radiology, pathology, prescription, clinical-note, and other health-report text is summarized when lab metrics are not present.
    - Optional model enrichment attempts.
 
 4. **Persist per-user**
    - Report row saved with `user_id`.
-   - File stored under `lab-reports/<user_id>/...`.
+   - File stored under `lab-reports/<user_id>/...` when suitable for standard upload.
+   - Larger PDFs can still be analyzed and saved without blocking on file attachment upload.
 
 5. **Dashboard**
    - User sees only their own reports and metrics.
    - Risk summary and trend visualization shown.
+   - Non-lab health reports show a general health-report summary instead of empty metric cards.
+   - Reports can be removed from the dashboard.
 
 6. **Assistant**
    - User asks report-specific questions.
    - Cloud assistant path if available.
-   - Local grounded fallback if provider/network unavailable.
+   - Local grounded fallback if provider/network unavailable, using either lab metrics or the health-report summary.
 
 ## Installation
 
@@ -250,7 +255,7 @@ npm run test
 
 ## Current Limitations (Under Development)
 
-- Some report formats still need parser tuning.
+- Some report formats still need parser tuning, especially highly scanned or poorly structured documents.
 - AI provider availability (DNS/token/provider config) can affect enrichment.
 - Assistant cloud behavior depends on edge function + upstream model health.
 - Additional validation and domain-specific parser coverage are in progress.
