@@ -8,6 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/features/auth/AuthProvider";
 import { ProtectedRoute } from "@/features/auth/ProtectedRoute";
 import { PublicOnlyRoute } from "@/features/auth/PublicOnlyRoute";
+import { AdminRoute } from "@/features/auth/AdminRoute";
 import AppLayout from "./components/AppLayout";
 import Upload from "./pages/Upload";
 import Dashboard from "./pages/Dashboard";
@@ -15,6 +16,8 @@ import Assistant from "./pages/Assistant";
 import SignIn from "./pages/auth/SignIn";
 import SignUp from "./pages/auth/SignUp";
 import ForgotPassword from "./pages/auth/ForgotPassword";
+import AdminLogin from "./pages/admin/AdminLogin";
+import AdminDashboard from "./pages/admin/AdminDashboard";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -51,6 +54,16 @@ const App = () => (
                   <PublicOnlyRoute>
                     <ForgotPassword />
                   </PublicOnlyRoute>
+                }
+              />
+
+              <Route path="/admin/login" element={<AdminLogin />} />
+              <Route
+                path="/admin/dashboard"
+                element={
+                  <AdminRoute>
+                    <AdminDashboard />
+                  </AdminRoute>
                 }
               />
 
