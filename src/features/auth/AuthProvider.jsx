@@ -1,36 +1,68 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, getToken, setToken, removeToken } from "@/lib/apiClient";
 
 const AuthContext = createContext(undefined);
 
 export function AuthProvider({ children }) {
-  const [session, setSession] = useState(null);
   const [user, setUser] = useState(null);
+  const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const checkUserSession = async () => {
+    const token = getToken();
+    if (!token) {
+      setUser(null);
+      setSession(null);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const data = await apiClient.getMe();
+      if (data?.user) {
+        setUser(data.user);
+        setSession({ access_token: token, user: data.user });
+      } else {
+        removeToken();
+        setUser(null);
+        setSession(null);
+      }
+    } catch (err) {
+      console.warn("Auth Session check failed:", err.message);
+      removeToken();
+      setUser(null);
+      setSession(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    let mounted = true;
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session ?? null);
-      setUser(data.session?.user ?? null);
-      setLoading(false);
-    });
-
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession ?? null);
-      setUser(nextSession?.user ?? null);
-      setLoading(false);
-    });
-
-    return () => {
-      mounted = false;
-      data.subscription.unsubscribe();
-    };
+    checkUserSession();
   }, []);
 
-  const value = useMemo(() => ({ user, session, loading }), [user, session, loading]);
+  const login = (token, userData) => {
+    setToken(token);
+    setUser(userData);
+    setSession({ access_token: token, user: userData });
+  };
+
+  const updateUser = (userData, token) => {
+    if (token) setToken(token);
+    setUser(userData);
+    setSession((prev) => ({ ...prev, user: userData, access_token: token || prev?.access_token }));
+  };
+
+  const logout = () => {
+    removeToken();
+    setUser(null);
+    setSession(null);
+  };
+
+  const value = useMemo(
+    () => ({ user, session, loading, login, logout, updateUser, checkUserSession }),
+    [user, session, loading]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

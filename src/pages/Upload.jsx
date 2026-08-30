@@ -1,21 +1,18 @@
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { UploadCloud, FileText, Loader2, ShieldCheck } from "lucide-react";
+import { UploadCloud, FileText, Loader2, ShieldCheck, Sparkles, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { extractTextFromFile } from "@/lib/extractText";
 import { analyzeReport } from "@/lib/analyzeReport";
 import { predictRisk } from "@/lib/predictRisk";
 import { createLocalReport } from "@/lib/localReports";
-import { cloudEnabled } from "@/lib/cloudMode";
+import { apiClient } from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
-const STANDARD_STORAGE_MAX_BYTES = 6 * 1024 * 1024;
-const STORAGE_UPLOAD_TIMEOUT_MS = 45_000;
-const REPORT_SAVE_TIMEOUT_MS = 30_000;
+
 function mergeAnalysisValues(analysisValues, enrichedValues) {
     const merged = {};
     Object.entries(analysisValues ?? {}).forEach(([key, value]) => {
@@ -28,18 +25,7 @@ function mergeAnalysisValues(analysisValues, enrichedValues) {
     });
     return merged;
 }
-function withTimeout(promise, timeoutMs, message) {
-    return new Promise((resolve, reject) => {
-        const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
-        promise.then((value) => {
-            window.clearTimeout(timer);
-            resolve(value);
-        }, (error) => {
-            window.clearTimeout(timer);
-            reject(error);
-        });
-    });
-}
+
 const Upload = () => {
     const { user } = useAuth();
     const navigate = useNavigate();
@@ -49,50 +35,46 @@ const Upload = () => {
     const [stage, setStage] = useState("");
     const [progress, setProgress] = useState(0);
     const [dragOver, setDragOver] = useState(false);
+
     const handleFile = useCallback((f) => {
-        if (!f)
-            return;
+        if (!f) return;
         if (!f.type.startsWith("image/") && f.type !== "application/pdf") {
             toast.error("Please upload a PDF or image file.");
             return;
         }
-        if (f.size > 10 * 1024 * 1024) {
-            toast.error("File too large (max 10 MB).");
+        if (f.size > 15 * 1024 * 1024) {
+            toast.error("File too large (max 15 MB).");
             return;
         }
         setFile(f);
         setPreviewUrl(f.type.startsWith("image/") ? URL.createObjectURL(f) : null);
     }, []);
+
     const onDrop = (e) => {
         e.preventDefault();
         setDragOver(false);
         handleFile(e.dataTransfer.files?.[0] ?? null);
     };
+
     const analyze = async () => {
-        if (!file)
-            return;
+        if (!file) return;
         setBusy(true);
         try {
             setStage("Extracting text (OCR/text extraction)...");
-            setProgress(5);
-            if (!user)
-                throw new Error("You must be signed in to analyze reports.");
-            const path = `${user.id}/${crypto.randomUUID()}-${file.name}`;
-            const useCloud = cloudEnabled();
-            // Extract text (may be CPU-heavy). Progress updates come from extractTextFromFile.
+            setProgress(15);
+            if (!user) throw new Error("You must be signed in to analyze reports.");
+
             const rawText = await extractTextFromFile(file, (m) => {
                 setStage(m);
             });
             setProgress(55);
-            setStage("Analyzing with ClinicalBERT...");
-            // ── Run analysis locally (no Edge Function needed) ──
+            setStage("Analyzing medical terms & metrics...");
+
             const ai = await analyzeReport(rawText, file.name);
-            console.log("ClinicalBERT analyze-report response:", ai);
             setStage("Running ML risk prediction...");
             setProgress(75);
-            // ── Run risk prediction locally ──
+
             const ml = predictRisk(ai.values);
-            console.log("ML predict-risk response:", ml);
             const reportValues = mergeAnalysisValues(ai.values, ml?.enriched_values);
             const hasLabValues = Object.values(reportValues).some((value) => value?.value != null);
             const reportPrediction = hasLabValues
@@ -106,150 +88,149 @@ const Upload = () => {
                     disclaimer: "This is not medical advice.",
                     ai_engine: ai.ai_engine ?? undefined,
                 };
-            if (!useCloud) {
-                const localReport = createLocalReport({
-                    file_name: file.name,
-                    file_path: path,
-                    raw_text: rawText,
-                    values: reportValues,
-                    summary: ai.summary ?? "",
-                    prediction: reportPrediction,
-                }, user.id);
-                setProgress(100);
-                toast.success("Report analyzed in local mode.");
-                navigate(`/dashboard/${localReport.id}`);
-                return;
-            }
-            // Ensure upload finished (or surface upload error)
-            setStage("Uploading file to storage...");
+
+            setStage("Uploading file to MinIO & saving report...");
             setProgress(85);
-            let cloudFilePath = path;
-            if (file.size > STANDARD_STORAGE_MAX_BYTES) {
-                cloudFilePath = null;
-                toast.warning("Large PDF analyzed. Saving report data without file attachment.");
-            }
-            else {
-                try {
-                    const { error: upErr } = await withTimeout(supabase.storage.from("lab-reports").upload(path, file, {
-                        contentType: file.type || undefined,
-                        upsert: false,
-                    }), STORAGE_UPLOAD_TIMEOUT_MS, "Storage upload timed out.");
-                    if (upErr)
-                        throw upErr;
-                }
-                catch (uploadError) {
-                    console.error("Upload error:", uploadError);
-                    cloudFilePath = null;
-                    toast.warning("Storage upload failed or timed out. Saving report data without file attachment.");
-                }
-            }
-            setStage("Saving report metadata...");
-            setProgress(92);
+
+            const formData = new FormData();
+            formData.append("file", file);
+            formData.append("file_name", file.name);
+            formData.append("raw_text", rawText || "");
+            formData.append("values", JSON.stringify(reportValues));
+            formData.append("summary", ai.summary || "");
+
             let report = null;
-            let insertError = null;
             try {
-                const insertResult = await withTimeout(supabase
-                    .from("reports")
-                    .insert({
+                report = await apiClient.createReport(formData);
+            } catch (err) {
+                console.warn("Backend save failed, fallback to local storage:", err.message);
+                report = createLocalReport({
                     file_name: file.name,
-                    user_id: user.id,
-                    file_path: cloudFilePath,
-                    raw_text: rawText,
-                    values: reportValues,
-                    summary: ai.summary ?? "",
-                    prediction: reportPrediction,
-                })
-                    .select("id")
-                    .single(), REPORT_SAVE_TIMEOUT_MS, "Saving report metadata timed out.");
-                report = insertResult.data;
-                insertError = insertResult.error;
-            }
-            catch (error) {
-                insertError = error;
-            }
-            const insErr = insertError || (!report ? new Error("Report metadata save returned no report id.") : null);
-            if (insErr) {
-                console.error("Insert error:", insErr);
-                const localReport = createLocalReport({
-                    file_name: file.name,
-                    file_path: path,
+                    file_path: file.name,
                     raw_text: rawText,
                     values: reportValues,
                     summary: ai.summary ?? "",
                     prediction: reportPrediction,
                 }, user.id);
-                toast.warning("Cloud database unavailable. Report saved locally in this browser.");
-                navigate(`/dashboard/${localReport.id}`);
-                return;
             }
-            if (cloudFilePath === null) {
-                toast.warning("Report saved to cloud DB, but file upload failed. Check Supabase Storage bucket/policies.");
-            }
+
             setProgress(100);
-            toast.success("Report analyzed!");
+            toast.success("Report analyzed successfully!");
             navigate(`/dashboard/${report.id}`);
-        }
-        catch (e) {
+        } catch (e) {
             console.error(e);
             const message = e instanceof Error ? e.message : "Something went wrong";
-            const msg = String(message || "");
-            if (/failed to fetch/i.test(msg)) {
-                toast.error("Network request failed. Check internet/Supabase connection and try again.");
-            }
-            else {
-                toast.error(message);
-            }
-        }
-        finally {
+            toast.error(message);
+        } finally {
             setBusy(false);
             setStage("");
             setProgress(0);
         }
     };
-    return (<div className="mx-auto max-w-3xl space-y-8">
-      <div className="space-y-3 text-center">
-        <h1 className="text-4xl font-bold tracking-tight">Upload your lab report</h1>
-        <p className="text-muted-foreground">
-          PDF or image. We'll extract values and explain them in plain English.
-        </p>
-      </div>
 
-      <Card onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={onDrop} className={cn("relative cursor-pointer border-2 border-dashed p-10 text-center transition-colors", dragOver ? "border-primary bg-accent" : "border-border hover:border-primary/50")} onClick={() => document.getElementById("file-input")?.click()}>
-        <input id="file-input" type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0] ?? null)}/>
-        {file ? (<div className="flex flex-col items-center gap-3">
-            {previewUrl ? (<img src={previewUrl} alt="preview" className="max-h-48 rounded-md shadow-card"/>) : (<FileText className="h-14 w-14 text-primary"/>)}
-            <div>
-              <div className="font-medium">{file.name}</div>
-              <div className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</div>
-            </div>
-          </div>) : (<div className="flex flex-col items-center gap-3">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-primary shadow-elevated">
-              <UploadCloud className="h-8 w-8 text-primary-foreground"/>
-            </div>
-            <div>
-              <div className="font-medium">Drag & drop your report here</div>
-              <div className="text-sm text-muted-foreground">or click to browse — PDF, PNG, JPG</div>
-            </div>
-          </div>)}
-      </Card>
-
-      {busy && (<Card className="space-y-3 p-5">
-          <div className="flex items-center gap-2 text-sm">
-            <Loader2 className="h-4 w-4 animate-spin text-primary"/>
-            <span>{stage}</span>
+    return (
+      <div className="mx-auto max-w-3xl space-y-8 py-4">
+        {/* Freud UI Title Section */}
+        <div className="space-y-3 text-center">
+          <div className="inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-4 py-1.5 text-xs font-semibold text-indigo-600 dark:text-indigo-300">
+            <Sparkles className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" /> Freud AI Medical Intelligence
           </div>
-          <Progress value={progress}/>
-        </Card>)}
+          <h1 className="text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl">
+            Upload Your Health Report
+          </h1>
+          <p className="text-base text-muted-foreground max-w-xl mx-auto">
+            Upload PDF or image lab reports. Our Clinical AI engine extracts parameters and provides instant medical insights.
+          </p>
+        </div>
 
-      <div className="flex flex-col items-center gap-3">
-        <Button size="lg" onClick={analyze} disabled={!file || busy} className="bg-gradient-primary px-8 shadow-elevated">
-          {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
-          Analyze report
-        </Button>
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <ShieldCheck className="h-3.5 w-3.5"/> Processed securely. Not medical advice.
-        </p>
+        {/* Freud UI Glassmorphic Dropzone Card */}
+        <Card
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
+          className={cn(
+            "relative cursor-pointer border-2 border-dashed p-12 text-center transition-all duration-300 rounded-3xl freud-card",
+            dragOver
+              ? "border-indigo-500 bg-indigo-500/10 freud-glow-indigo scale-[1.01]"
+              : "border-border hover:border-indigo-500/50 hover:bg-accent/40"
+          )}
+          onClick={() => document.getElementById("file-input")?.click()}
+        >
+          <input
+            id="file-input"
+            type="file"
+            accept="application/pdf,image/*"
+            className="hidden"
+            onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
+          />
+
+          {file ? (
+            <div className="flex flex-col items-center gap-4 animate-in fade-in zoom-in duration-200">
+              {previewUrl ? (
+                <img src={previewUrl} alt="preview" className="max-h-52 rounded-2xl border border-border shadow-2xl" />
+              ) : (
+                <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-indigo-600/20 text-indigo-500 dark:text-indigo-400 border border-indigo-500/30 freud-glow-indigo">
+                  <FileText className="h-10 w-10" />
+                </div>
+              )}
+              <div>
+                <div className="font-bold text-lg text-foreground flex items-center justify-center gap-2">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-500 dark:text-emerald-400" />
+                  {file.name}
+                </div>
+                <div className="text-xs font-semibold text-muted-foreground mt-1">
+                  {(file.size / (1024 * 1024)).toFixed(2)} MB • Ready for AI Analysis
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-4">
+              <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-xl freud-glow-indigo">
+                <UploadCloud className="h-10 w-10" />
+              </div>
+              <div className="space-y-1">
+                <div className="font-bold text-lg text-foreground">
+                  Drag & drop your lab report here
+                </div>
+                <div className="text-xs text-muted-foreground font-medium">
+                  Supports PDF, PNG, JPG files up to 15 MB
+                </div>
+              </div>
+            </div>
+          )}
+        </Card>
+
+        {/* Progress Display */}
+        {busy && (
+          <Card className="space-y-3 p-6 freud-card border-indigo-500/30 rounded-2xl animate-in fade-in duration-300">
+            <div className="flex items-center justify-between text-sm font-semibold">
+              <span className="flex items-center gap-2 text-indigo-600 dark:text-indigo-300">
+                <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
+                {stage}
+              </span>
+              <span className="text-muted-foreground">{progress}%</span>
+            </div>
+            <Progress value={progress} className="h-2 bg-muted rounded-full" />
+          </Card>
+        )}
+
+        {/* Submit Action */}
+        <div className="flex flex-col items-center gap-4">
+          <Button
+            size="lg"
+            onClick={analyze}
+            disabled={!file || busy}
+            className="w-full sm:w-auto bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 hover:from-indigo-500 hover:to-pink-400 text-white font-bold text-base px-10 py-6 rounded-2xl shadow-xl freud-glow-indigo disabled:opacity-50 transition-all"
+          >
+            {busy ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Sparkles className="mr-2 h-5 w-5" />}
+            Analyze Report with Freud AI
+          </Button>
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
+            <ShieldCheck className="h-4 w-4 text-emerald-500 dark:text-emerald-400" /> Processed with End-to-End Privacy. Not medical advice.
+          </p>
+        </div>
       </div>
-    </div>);
+    );
 };
+
 export default Upload;

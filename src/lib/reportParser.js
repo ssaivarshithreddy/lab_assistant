@@ -61,11 +61,20 @@ export function parseReportText(rawText) {
   for (const rule of RULES) {
     const hit = findMetricValue(text, rule.aliases);
     if (!hit) continue;
+
+    let finalValue = hit.value;
+    if (rule.key === "platelets") {
+      if (finalValue > 0 && finalValue <= 15) finalValue = Math.round(finalValue * 100 * 10) / 10;
+      else if (finalValue > 1000) finalValue = Math.round((finalValue / 1000) * 10) / 10;
+    } else if (rule.key === "wbc") {
+      if (finalValue > 200) finalValue = Math.round((finalValue / 1000) * 100) / 100;
+    }
+
     metrics[rule.key] = {
       name: rule.label,
-      value: hit.value,
+      value: finalValue,
       unit: rule.unit,
-      status: classify(hit.value, rule.low, rule.high),
+      status: classify(finalValue, rule.low, rule.high),
       confidence: Number(hit.confidence.toFixed(2)),
       source: "regex",
     };
