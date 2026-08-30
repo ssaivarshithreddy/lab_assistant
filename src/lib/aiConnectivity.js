@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/apiClient";
 
 function getEnv(name) {
   const v = import.meta.env[name];
@@ -8,83 +8,56 @@ function getEnv(name) {
 export async function runAiConnectivityTest() {
   const checks = [];
 
-  const supabaseUrl = getEnv("VITE_SUPABASE_URL");
-  const supabaseKey = getEnv("VITE_SUPABASE_PUBLISHABLE_KEY");
   const hfUrl = getEnv("VITE_AI_GATEWAY_URL");
   const hfKey = getEnv("VITE_AI_GATEWAY_KEY");
   const groqKey = getEnv("VITE_GROQ_API_KEY");
 
+  // 1. Environment variables check
   checks.push({
     name: "Environment variables",
-    ok: Boolean(groqKey || (supabaseUrl && supabaseKey && hfUrl && hfKey)),
+    ok: Boolean(groqKey || (hfUrl && hfKey)),
     details: groqKey
       ? "Groq API key is configured ✓"
-      : !supabaseUrl || !supabaseKey || !hfUrl || !hfKey
-      ? "Missing env vars: Need either GROQ_API_KEY or (SUPABASE_URL + SUPABASE_PUBLISHABLE_KEY + AI_GATEWAY_URL + AI_GATEWAY_KEY)."
-      : "All required env vars are present.",
+      : "Missing env vars: VITE_GROQ_API_KEY is recommended for AI Assistant chat.",
   });
 
+  // 2. PostgreSQL DB Connectivity check
   try {
-    const { error } = await supabase.from("reports").select("id").limit(1);
+    const reports = await apiClient.getReports();
     checks.push({
-      name: "Supabase DB connectivity",
-      ok: !error,
-      details: error ? `${error.message}` : "Connected to reports table.",
+      name: "PostgreSQL DB Connectivity",
+      ok: Array.isArray(reports),
+      details: Array.isArray(reports)
+        ? `Connected to PostgreSQL database (retrieved ${reports.length} user reports).`
+        : "Database returned unexpected response format.",
     });
   } catch (e) {
     checks.push({
-      name: "Supabase DB connectivity",
+      name: "PostgreSQL DB Connectivity",
       ok: false,
       details: `Request failed: ${String(e?.message || e)}`,
     });
   }
 
+  // 3. Express Backend API Health
   try {
-    const resp = await fetch(`${supabaseUrl}/functions/v1/chat-assistant`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
-      },
-      body: JSON.stringify({
-        messages: [{ role: "user", content: "Reply with exactly: OK" }],
-        reportContext: "Diagnostics check",
-      }),
+    const me = await apiClient.getMe();
+    checks.push({
+      name: "Express Backend API Health",
+      ok: Boolean(me?.user),
+      details: me?.user
+        ? `Express server running on http://localhost:5000 (Authenticated as ${me.user.email}).`
+        : "Backend server reachable.",
     });
-
-    const ctype = resp.headers.get("content-type") || "";
-    if (!resp.ok) {
-      const t = await resp.text();
-      checks.push({
-        name: "chat-assistant function",
-        ok: false,
-        details: `HTTP ${resp.status}: ${t.slice(0, 250)}`,
-      });
-    } else if (ctype.includes("text/event-stream")) {
-      checks.push({
-        name: "chat-assistant function",
-        ok: true,
-        details: "Function reachable (streaming response).",
-      });
-    } else {
-      const j = await resp.json().catch(() => ({}));
-      checks.push({
-        name: "chat-assistant function",
-        ok: Boolean(j?.reply || j?.message),
-        details: j?.reply || j?.message
-          ? "Function reachable (JSON response)."
-          : "Function responded but no assistant text field found.",
-      });
-    }
   } catch (e) {
     checks.push({
-      name: "chat-assistant function",
+      name: "Express Backend API Health",
       ok: false,
       details: `Request failed: ${String(e?.message || e)}`,
     });
   }
 
+  // 4. HuggingFace / ClinicalBERT endpoint
   const hfCandidates = [
     hfUrl,
     "https://router.huggingface.co/hf-inference/models/d4data/biomedical-ner-all",
@@ -98,7 +71,7 @@ export async function runAiConnectivityTest() {
       const resp = await fetch(candidate, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${hfKey}`,
+          Authorization: hfKey ? `Bearer ${hfKey}` : undefined,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -118,7 +91,7 @@ export async function runAiConnectivityTest() {
       checks.push({
         name: "HF/ClinicalBERT endpoint",
         ok: true,
-        details: `Reachable via ${candidate}. Returned ${Array.isArray(entities) ? entities.length : 0} entity records.`,
+        details: `Reachable via ${candidate}. Extracted ${Array.isArray(entities) ? entities.length : 0} entity records.`,
       });
       hfSuccess = true;
       break;
@@ -131,11 +104,11 @@ export async function runAiConnectivityTest() {
     checks.push({
       name: "HF/ClinicalBERT endpoint",
       ok: false,
-      details: `All HF endpoints failed: ${hfErrors.join(" | ").slice(0, 500)}`,
+      details: `All HF endpoints failed: ${hfErrors.join(" | ").slice(0, 300)}`,
     });
   }
 
-  // Test Groq connectivity
+  // 5. Groq API connectivity
   if (groqKey) {
     try {
       const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -145,7 +118,7 @@ export async function runAiConnectivityTest() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
+          model: "qwen/qwen3.6-27b",
           messages: [{ role: "user", content: "Reply with: OK" }],
           max_tokens: 10,
           stream: false,
@@ -156,7 +129,7 @@ export async function runAiConnectivityTest() {
       if (!resp.ok) {
         const text = await resp.text();
         checks.push({
-          name: "Groq API (llama-3.3-70b-versatile)",
+          name: "Groq API (qwen3.6-27b / gpt-oss)",
           ok: false,
           details: `HTTP ${resp.status}: ${text.slice(0, 250)}`,
         });
@@ -164,20 +137,20 @@ export async function runAiConnectivityTest() {
         const data = await resp.json().catch(() => ({}));
         const hasContent = Boolean(data.choices?.[0]?.message?.content);
         checks.push({
-          name: "Groq API (llama-3.3-70b-versatile)",
+          name: "Groq API (qwen3.6-27b / gpt-oss)",
           ok: hasContent,
           details: hasContent ? "✓ Groq API is fully operational" : "Groq responded but no message content",
         });
       } else {
         checks.push({
-          name: "Groq API (llama-3.3-70b-versatile)",
+          name: "Groq API (qwen3.6-27b / gpt-oss)",
           ok: false,
           details: `Unexpected response type: ${ctype}`,
         });
       }
     } catch (e) {
       checks.push({
-        name: "Groq API (llama-3.3-70b-versatile)",
+        name: "Groq API (qwen3.6-27b / gpt-oss)",
         ok: false,
         details: `Request failed: ${String(e?.message || e)}`,
       });

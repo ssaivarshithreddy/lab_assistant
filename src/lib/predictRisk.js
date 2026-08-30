@@ -1,8 +1,6 @@
 /**
- * Client-side ML risk prediction — rule-based ensemble inspired by a Random Forest
- * trained on reference ranges from public CBC datasets. Deterministic & explainable.
- *
- * This replaces the Supabase Edge Function `predict-risk`.
+ * Predictive Health Risk Engine
+ * Computes disease and biomarker risk indicators based on lab values.
  */
 
 const RANGES = {

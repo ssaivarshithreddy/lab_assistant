@@ -1,20 +1,24 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogIn, AlertCircle, Loader2 } from "lucide-react";
+import { LogIn, AlertCircle, Loader2, ShieldCheck, Activity, Sun, Moon, Monitor } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
+import { useTheme } from "next-themes";
 import { adminAuthService } from "@/services/adminAuthService";
+
 const AdminLogin = () => {
     const navigate = useNavigate();
+    const { theme, setTheme } = useTheme();
     const credentials = adminAuthService.getAdminCredentials();
     const [email, setEmail] = useState(credentials.email);
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
+
     const handleLogin = async (e) => {
         e.preventDefault();
         setError("");
@@ -43,60 +47,103 @@ const AdminLogin = () => {
             setLoading(false);
         }
     };
-    return (<div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800 p-4">
-      <Card className="w-full max-w-md shadow-2xl">
-        <CardHeader className="text-center border-b">
-          <div className="flex justify-center mb-4">
-            <div className="bg-blue-100 p-3 rounded-lg">
-              <LogIn className="w-6 h-6 text-blue-600"/>
-            </div>
-          </div>
-          <CardTitle className="text-2xl">Admin Login</CardTitle>
-          <p className="text-sm text-slate-500 mt-2">Access the administrator dashboard</p>
-        </CardHeader>
-        <CardContent className="pt-6">
-          {error && (<div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg mb-4">
-              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0"/>
-              <span className="text-sm text-red-700">{error}</span>
-            </div>)}
 
-          <Alert className="mb-4 bg-green-50 border-green-200">
-            <AlertDescription className="text-sm">
-              <span className="font-semibold text-green-900">Admin Credentials:</span>
-              <div className="mt-2 space-y-1 text-green-800">
-                <p><span className="font-medium">Email:</span> <code className="bg-white px-2 py-1 rounded">{credentials.email}</code></p>
-                <p><span className="font-medium">Password:</span> <code className="bg-white px-2 py-1 rounded">{credentials.password}</code></p>
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background text-foreground p-4 font-sans selection:bg-amber-500/30 relative transition-colors duration-300">
+        {/* Top Right Theme Toggle */}
+        <div className="absolute top-4 right-4 z-20">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => {
+              const nextTheme = theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
+              setTheme(nextTheme);
+              toast.success(`Theme mode: ${nextTheme.toUpperCase()}`);
+            }}
+            className="rounded-2xl border-border bg-card text-foreground hover:bg-muted transition-all shadow-sm"
+            title={`Current Theme: ${(theme || "system").toUpperCase()}. Click to toggle Light / Dark / System Auto Mode.`}
+          >
+            {theme === "light" && <Sun className="h-4 w-4 text-amber-500" />}
+            {theme === "dark" && <Moon className="h-4 w-4 text-indigo-400" />}
+            {theme === "system" && <Monitor className="h-4 w-4 text-muted-foreground" />}
+          </Button>
+        </div>
+
+        <Card className="w-full max-w-md freud-card border-border rounded-3xl shadow-2xl overflow-hidden">
+          <CardHeader className="text-center border-b border-border pb-6 pt-8">
+            <div className="flex justify-center mb-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-gradient-to-tr from-amber-500 to-red-500 text-white shadow-xl freud-glow-indigo">
+                <ShieldCheck className="w-8 h-8" />
               </div>
-            </AlertDescription>
-          </Alert>
-
-          {/* Email/Password Form */}
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" placeholder="Enter email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={loading}/>
             </div>
+            <CardTitle className="text-2xl font-extrabold text-foreground">Freud Admin Portal</CardTitle>
+            <p className="text-xs text-muted-foreground mt-1.5 font-medium">Access system telemetry & user management</p>
+          </CardHeader>
 
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" placeholder="Enter password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={loading}/>
-            </div>
+          <CardContent className="pt-6 space-y-4">
+            {error && (
+              <div className="flex items-center gap-2 p-3 bg-rose-500/10 border border-rose-500/30 rounded-2xl">
+                <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                <span className="text-xs font-semibold text-rose-600 dark:text-rose-300">{error}</span>
+              </div>
+            )}
 
-            <Button type="submit" className="w-full" disabled={loading} size="lg">
-              {loading ? (<>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin"/>
-                  Logging in...
-                </>) : ("Login")}
-            </Button>
-          </form>
+            <Alert className="bg-amber-500/10 border-amber-500/30 rounded-2xl">
+              <AlertDescription className="text-xs text-amber-700 dark:text-amber-200">
+                <span className="font-bold text-amber-800 dark:text-amber-300">Default Admin Credentials:</span>
+                <div className="mt-2 space-y-1 text-amber-800 dark:text-amber-200 font-medium">
+                  <p>Email: <code className="bg-card px-2 py-0.5 rounded-lg border border-amber-500/30 font-mono text-amber-600 dark:text-amber-300">{credentials.email}</code></p>
+                  <p>Password: <code className="bg-card px-2 py-0.5 rounded-lg border border-amber-500/30 font-mono text-amber-600 dark:text-amber-300">{credentials.password}</code></p>
+                </div>
+              </AlertDescription>
+            </Alert>
 
-          <div className="mt-4 p-3 bg-amber-50 rounded-lg border border-amber-200">
-            <p className="text-xs text-slate-600">
-              <span className="font-semibold">Note:</span> Use the credentials shown above to access the admin panel.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    </div>);
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="email" className="text-xs font-semibold text-foreground">Admin Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="Enter email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={loading}
+                  className="bg-muted/50 border-border text-foreground placeholder:text-muted-foreground rounded-2xl text-sm"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="password" className="text-xs font-semibold text-foreground">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="Enter password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={loading}
+                  className="bg-muted/50 border-border text-foreground placeholder:text-muted-foreground rounded-2xl text-sm"
+                />
+              </div>
+
+              <Button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 hover:from-amber-600 hover:to-red-600 text-white font-bold rounded-2xl py-6 shadow-xl freud-glow-indigo text-base transition-all"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Authenticating Admin...
+                  </>
+                ) : (
+                  "Access Admin Dashboard"
+                )}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+    );
 };
+
 export default AdminLogin;

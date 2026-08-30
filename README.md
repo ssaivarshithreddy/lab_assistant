@@ -1,267 +1,63 @@
 # LabSense - AI Lab Assistant
 
-## Project Status
+## Project Overview
 
-LabSense is currently **under development**.
+LabSense is a full-stack health-tech web application designed for comprehensive lab report analysis, RAG-assisted medical reasoning, and object storage management.
 
-The app is functional for core flows (auth, report upload, analysis, dashboard, assistant), but it is not yet feature-complete and should be treated as an evolving product.
+### Key Capabilities:
+- **Health Report Processing:** Upload lab reports (PDF/Images) with PDF text extraction + Tesseract OCR fallback.
+- **Deterministic Parameter Extraction:** Regex and clinical rule engine parameter validation for CBC, LFT, KFT, Glycemic, and Lipid panels.
+- **Clinical Medical Reasoning Chain:** 4-step medical rationale (Observation & Triaging → Pathophysiological Mechanisms → Differential Considerations → Physician Questions).
+- **Dual-Source 5-Step RAG Assistant:** Searches Curated Medical Knowledge Base + User Historical Reports.
+- **PostgreSQL Database Inspector & Admin Console:** Interactive table browser, raw SQL query runner, and RAG chunk manager.
+- **MinIO Object Storage & File Manager:** Microservice object storage handling PDF/image uploads with local disk fallback.
+- **Containerized Architecture:** Fully containerized setup via `docker-compose.yml` for Node.js, PostgreSQL, MinIO, and Nginx React UI.
 
-## Overview
-
-LabSense is a full-stack health-tech web application that helps users:
-
-- upload lab, radiology, pathology, prescription, and other health reports (PDF/images),
-- extract report text with PDF parsing + OCR,
-- generate structured insights,
-- view report history and trends,
-- ask an AI assistant questions grounded in their own report data,
-- keep all report data private per authenticated user.
-
-The platform is built as a modern SaaS-style app using Supabase for authentication, storage, database, and row-level access control.
+---
 
 ## Tech Stack
 
-- Frontend: React + TypeScript + Vite
-- UI: Tailwind CSS + shadcn/ui + Radix
-- Routing: React Router
-- Data fetching/state: TanStack Query
-- Backend services: Supabase (Auth, Postgres, Storage, Edge Functions)
-- OCR/Text extraction:
-  - `pdfjs-dist` for PDF text extraction
-  - `tesseract.js` for OCR fallback
+- **Frontend:** React 18, Vite, Tailwind CSS, Lucide React, Recharts, TanStack Query
+- **Backend API:** Node.js, Express, JWT Authentication, Multer
+- **Database:** PostgreSQL 16 (`pg`, `uuid-ossp`, `pg_trgm` trigram search)
+- **Object Storage:** MinIO S3 Object Storage API (`minio`)
+- **AI & RAG Engine:** Groq API (Llama3 model) + Curated Medical Knowledge Base + PostgreSQL GIN Trigram Vector Search
+- **Containerization:** Docker, Docker Compose, Nginx
 
-## Core Features (Current)
-
-- Email/password authentication (Sign Up, Sign In, Forgot Password)
-- Google sign-in support (requires Supabase provider setup)
-- Session persistence and route protection
-- User profile auto-creation (`profiles` table)
-- Report upload and secure storage pathing per user
-- Report analysis pipeline for lab metrics and general health-report findings
-- Radiology/pathology/clinical-note summary fallback when standard lab metrics are not present
-- Dashboard with metric cards, summary, risks, and trend chart
-- AI assistant with cloud mode + robust local fallback responses
-- AI connectivity diagnostics tool
-- Report removal from dashboard, including stored file cleanup when available
-
-## Architecture Summary
-
-### Frontend layers
-
-- `src/features/auth`: auth provider and route guards
-- `src/services`: service-level integrations (auth service)
-- `src/pages`: screen-level UI and page flows
-- `src/lib`: analysis, OCR, helpers, local fallbacks
-- `src/integrations/supabase`: Supabase client and generated DB types
-
-### Backend/Data layers
-
-- Supabase Postgres tables:
-  - `profiles`
-  - `reports`
-  - `chat_messages`
-- Supabase Storage:
-  - `lab-reports` bucket (user-folder scoped)
-- Supabase Edge Functions:
-  - `chat-assistant`
-  - `analyze-report` (available, optional path)
+---
 
 ## Folder Structure
 
 ```text
-src/
-  components/
-  features/
-    auth/
-      AuthProvider.tsx
-      ProtectedRoute.tsx
-      PublicOnlyRoute.tsx
-  integrations/
-    supabase/
-      client.ts
-      types.ts
-  lib/
-    analyzeReport.ts
-    extractText.ts
-    aiConnectivity.ts
-    localReports.ts
-  pages/
-    auth/
-      AuthShell.tsx
-      SignIn.tsx
-      SignUp.tsx
-      ForgotPassword.tsx
-    Upload.tsx
-    Dashboard.tsx
-    Assistant.tsx
-  services/
-    authService.ts
-supabase/
-  functions/
-  migrations/
+├── server/
+│   ├── index.js              # Express API server & routes
+│   ├── db.js                 # PostgreSQL connection pool
+│   ├── minioClient.js        # MinIO S3 object storage client
+│   ├── schema.sql            # Postgres database migrations & indexes
+│   └── Dockerfile            # Node.js backend Dockerfile
+├── src/
+│   ├── components/           # UI cards, Medical Reasoning cards, layout
+│   ├── features/auth/        # Auth provider & route guards
+│   ├── lib/                  # RAG engine, Medical Knowledge Base, Groq API
+│   ├── pages/                # Upload, Dashboard, Assistant, Admin Portal
+│   └── services/             # Admin stats & API client wrappers
+├── docker-compose.yml        # Docker Compose stack (Postgres, MinIO, Backend, Frontend)
+├── Dockerfile                # Frontend multi-stage Nginx Dockerfile
+└── nginx.conf                # Nginx SPA fallback configuration
 ```
 
-## Application Requirements
+---
 
-### Runtime
+## Quick Start with Docker
 
-- Node.js 18+ (recommended 20+)
-- npm 9+
-
-### External services
-
-- Supabase project with:
-  - Auth enabled
-  - Postgres database
-  - Storage bucket (`lab-reports`)
-  - Required SQL migrations applied
-
-### Optional provider config
-
-- Google OAuth in Supabase (for Google sign-in)
-- Hugging Face/OpenAI gateway creds if using remote model enrichment
-
-## Environment Variables
-
-Create `.env` in project root:
-
-```env
-VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=<supabase-anon-key>
-
-# Optional AI settings
-VITE_AI_GATEWAY_URL=
-VITE_AI_GATEWAY_KEY=
-VITE_FORCE_LOCAL_MODE=false
-VITE_USE_EDGE_FUNCTION=false
-VITE_USE_SUPABASE_FUNCTION=false
-```
-
-Security note:
-- Use only Supabase anon key on frontend.
-- Never expose service role key in client code.
-
-## Database & Security Setup
-
-Apply migrations from `supabase/migrations/`.
-
-Important migration:
-- `20260526124000_auth_and_rls_hardening.sql`
-
-This includes:
-- `profiles` table creation
-- trigger to auto-create profile on signup
-- strict RLS policies for `profiles`, `reports`, `chat_messages`
-- storage policies for user-isolated report files
-
-## Authentication Flow
-
-### Signup flow
-
-1. User enters name, email, password.
-2. Supabase Auth account is created.
-3. Profile row is auto-created in `profiles` via trigger.
-4. User is redirected to app home (or email verification path depending on auth settings).
-
-### Signin flow
-
-1. User signs in with email/password or Google.
-2. Session is persisted in browser storage.
-3. App auto-restores session on refresh.
-
-### Protected routes
-
-- Unauthenticated users are redirected to `/signin`.
-- Authenticated users are redirected away from public auth pages.
-
-## Application Flow
-
-1. **Authenticate**
-   - User logs in or signs up.
-
-2. **Upload report**
-   - User uploads PDF/image.
-   - Text extraction runs:
-     - PDF text extraction first
-     - OCR fallback if needed
-
-3. **Analyze**
-   - Deterministic parser extracts metrics when applicable.
-   - Radiology, pathology, prescription, clinical-note, and other health-report text is summarized when lab metrics are not present.
-   - Optional model enrichment attempts.
-
-4. **Persist per-user**
-   - Report row saved with `user_id`.
-   - File stored under `lab-reports/<user_id>/...` when suitable for standard upload.
-   - Larger PDFs can still be analyzed and saved without blocking on file attachment upload.
-
-5. **Dashboard**
-   - User sees only their own reports and metrics.
-   - Risk summary and trend visualization shown.
-   - Non-lab health reports show a general health-report summary instead of empty metric cards.
-   - Reports can be removed from the dashboard.
-
-6. **Assistant**
-   - User asks report-specific questions.
-   - Cloud assistant path if available.
-   - Local grounded fallback if provider/network unavailable, using either lab metrics or the health-report summary.
-
-## Installation
+Run the entire application stack with a single command:
 
 ```bash
-npm install
+docker compose up -d
 ```
 
-## Running Commands
-
-### Development
-
-```bash
-npm run dev
-```
-
-### Build
-
-```bash
-npm run build
-```
-
-### Preview production build
-
-```bash
-npm run preview
-```
-
-### Lint
-
-```bash
-npm run lint
-```
-
-### Tests
-
-```bash
-npm run test
-```
-
-## Supabase Setup Checklist
-
-1. Set project URL + anon key in `.env`.
-2. Apply migrations.
-3. Verify `lab-reports` bucket exists.
-4. Ensure RLS policies are active.
-5. Enable Google provider (if using Google login).
-6. Deploy edge functions (if using cloud assistant/analyzer paths).
-
-## Current Limitations (Under Development)
-
-- Some report formats still need parser tuning, especially highly scanned or poorly structured documents.
-- AI provider availability (DNS/token/provider config) can affect enrichment.
-- Assistant cloud behavior depends on edge function + upstream model health.
-- Additional validation and domain-specific parser coverage are in progress.
-
-## Notes for Contributors
-
-- Keep auth and data ownership strict (`user_id` on all user-generated records).
-- Do not bypass RLS in client code.
-- Preserve local fallback behavior for resilience when cloud AI is unavailable.
+### Application Endpoints:
+- 🌐 **React Application:** `http://localhost:8080`
+- ⚙️ **Backend API:** `http://localhost:5000/api`
+- 🗄️ **MinIO Storage Console:** `http://localhost:9001` *(User: `minioadmin` / Password: `minioadminpassword`)*
+- 📊 **PostgreSQL Database:** `localhost:5432` *(Database: `lab_assistant`, User: `postgres`, Password: `postgrespassword`)*

@@ -1,12 +1,8 @@
 /**
- * Client-side lab report analyzer using ClinicalBERT (Hugging Face Inference API)
- * + regex-based numeric value extraction.
- *
- * This replaces the Supabase Edge Function `analyze-report` so the app works
- * without needing to deploy Edge Functions (which require Docker).
+ * Clinical Report Analyzer
+ * Analyzes extracted laboratory metrics and provides report findings.
  */
 
-import { supabase } from "@/integrations/supabase/client";
 import { cloudEnabled } from "@/lib/cloudMode";
 
 function escapeRegex(text) {
@@ -53,14 +49,17 @@ function findValue(text, keys) {
 }
 
 function normalizeWbc(v) {
-  if (v > 200) return v / 1000;
-  if (v > 0 && v < 1) return v * 10;
+  if (!Number.isFinite(v)) return null;
+  if (v > 200) return Math.round((v / 1000) * 100) / 100;
   return v;
 }
 
 function normalizePlatelets(v) {
-  if (v > 10000) return v / 1000;
-  if (v > 0 && v < 50) return v * 10;
+  if (!Number.isFinite(v)) return null;
+  // If reported in Lakhs/cumm or Lacs (e.g. 2.69 Lakhs/cumm), convert to 10^9/L (2.69 * 100 = 269)
+  if (v > 0 && v <= 15) return Math.round(v * 100 * 10) / 10;
+  // If reported in raw count (e.g. 269000), convert to 10^9/L (269000 / 1000 = 269)
+  if (v > 1000) return Math.round((v / 1000) * 10) / 10;
   return v;
 }
 
@@ -434,27 +433,6 @@ function buildHealthReportSummary(text, fileName) {
 
 async function callClinicalBERT(text, apiKey) {
   try {
-    const useEdge =
-      cloudEnabled() &&
-      (import.meta.env.VITE_USE_EDGE_FUNCTION === "true" || import.meta.env.VITE_USE_SUPABASE_FUNCTION === "true");
-    if (useEdge) {
-      try {
-        const fnName = 'analyze-report';
-        const res = await supabase.functions.invoke(fnName, {
-          body: JSON.stringify({ rawText: text, fileName: '' }),
-        });
-        if (res.error) {
-          console.warn('Supabase function returned error', res.error);
-        } else {
-          const data = res.data ?? res.body ?? res;
-          if (Array.isArray(data.findings)) return data.findings;
-          if (Array.isArray(data)) return data;
-        }
-      } catch (e) {
-        console.warn('Calling supabase function failed, falling back to direct HF call:', e);
-      }
-    }
-
     const configuredUrl = import.meta.env.VITE_AI_GATEWAY_URL;
     const fallbackUrls = [
       "https://router.huggingface.co/hf-inference/models/d4data/biomedical-ner-all",

@@ -1,1 +1,0 @@
-ALTER TABLE public.reports ADD COLUMN IF NOT EXISTS prediction jsonb DEFAULT '{}'::jsonb;
