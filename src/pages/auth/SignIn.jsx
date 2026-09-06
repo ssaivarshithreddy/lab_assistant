@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { AuthShell } from "@/pages/auth/AuthShell";
 import { signInWithEmail, signInWithGoogle } from "@/services/authService";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { apiClient } from "@/lib/apiClient";
 
 function validEmail(v) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
@@ -18,6 +19,13 @@ export default function SignIn() {
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [googleLoading, setGoogleLoading] = useState(false);
+
+    // 2FA Security State
+    const [requires2FA, setRequires2FA] = useState(false);
+    const [twoFactorUserId, setTwoFactorUserId] = useState(null);
+    const [twoFactorCode, setTwoFactorCode] = useState("");
+    const [verifying2FA, setVerifying2FA] = useState(false);
+
     const navigate = useNavigate();
     const location = useLocation();
     const { login } = useAuth();
@@ -39,12 +47,19 @@ export default function SignIn() {
                 toast.error(error.message);
                 return;
             }
+
+            if (data?.requires_2fa) {
+                setRequires2FA(true);
+                setTwoFactorUserId(data.user_id);
+                toast.info("2FA Code Generated! Please enter the 6-digit security code.");
+                return;
+            }
+
             if (data?.token && data?.user) {
                 login(data.token, data.user);
             }
             toast.success("Signed in successfully.");
             
-            // If user is an admin, navigate directly to Admin Dashboard
             if (data?.user?.role === "admin") {
                 navigate("/admin/dashboard", { replace: true });
             } else {
@@ -53,6 +68,33 @@ export default function SignIn() {
             }
         } finally {
             setLoading(false);
+        }
+    }
+
+    async function onVerify2FA(e) {
+        e.preventDefault();
+        if (!twoFactorCode || twoFactorCode.length < 6) {
+            toast.error("Enter 6-digit security code.");
+            return;
+        }
+        setVerifying2FA(true);
+        try {
+            const res = await apiClient.verify2Fa({ user_id: twoFactorUserId, code: twoFactorCode.trim() });
+            if (res?.token && res?.user) {
+                login(res.token, res.user);
+                toast.success("2FA Authentication successful!");
+                if (res.user.role === "admin") {
+                    navigate("/admin/dashboard", { replace: true });
+                } else {
+                    navigate("/", { replace: true });
+                }
+            } else {
+                toast.error(res?.error || "Invalid 2FA security code");
+            }
+        } catch (err) {
+            toast.error(err.message || "Failed to verify 2FA code");
+        } finally {
+            setVerifying2FA(false);
         }
     }
 
@@ -66,6 +108,50 @@ export default function SignIn() {
         } finally {
             setGoogleLoading(false);
         }
+    }
+
+    if (requires2FA) {
+        return (
+          <AuthShell title="Two-Factor Authentication" subtitle={`A 6-digit security code was dispatched for ${email}.`}>
+            <form onSubmit={onVerify2FA} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground flex items-center justify-between" htmlFor="2faCode">
+                  <span>Enter 6-Digit 2FA Security Code</span>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">Check Console / Email</span>
+                </label>
+                <Input
+                  id="2faCode"
+                  type="text"
+                  maxLength={6}
+                  value={twoFactorCode}
+                  onChange={(e) => setTwoFactorCode(e.target.value)}
+                  placeholder="e.g. 123456"
+                  autoFocus
+                  required
+                  className="bg-muted/50 border-border text-foreground text-center text-lg font-mono tracking-widest rounded-2xl h-12"
+                />
+              </div>
+
+              <Button
+                type="submit"
+                disabled={verifying2FA}
+                className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-2xl h-11 shadow-lg"
+              >
+                {verifying2FA ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                Verify & Authenticate
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setRequires2FA(false)}
+                className="w-full text-xs text-muted-foreground hover:text-foreground"
+              >
+                ← Back to Password Login
+              </Button>
+            </form>
+          </AuthShell>
+        );
     }
 
     return (
@@ -116,7 +202,7 @@ export default function SignIn() {
 
           <Button
             type="submit"
-            className="w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 hover:from-indigo-500 hover:to-pink-400 text-white font-bold rounded-2xl py-6 shadow-xl freud-glow-indigo text-sm flex items-center justify-center gap-2"
+            className="w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 hover:from-indigo-500 hover:to-pink-400 text-white font-bold rounded-2xl py-6 shadow-xl glow-indigo text-sm flex items-center justify-center gap-2"
             disabled={loading}
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}

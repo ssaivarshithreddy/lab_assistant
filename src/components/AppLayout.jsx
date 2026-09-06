@@ -32,17 +32,17 @@ const AppLayout = () => {
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans transition-colors duration-300">
-      {/* Freud UI Glassmorphic Header Navigation */}
-      <header className="sticky top-0 z-40 freud-glass border-b border-border shadow-md">
+      {/* Glassmorphic Header Navigation */}
+      <header className="sticky top-0 z-40 glass-panel border-b border-border shadow-md">
         <div className="container mx-auto flex h-20 items-center justify-between gap-4 px-4 sm:px-6">
           {/* Brand Logo */}
           <NavLink to="/" className="flex items-center gap-3 group">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 shadow-lg freud-glow-indigo transition-transform group-hover:scale-105">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 shadow-lg glow-indigo transition-transform group-hover:scale-105">
               <Activity className="h-6 w-6 text-white" />
             </div>
             <div className="leading-tight">
               <div className="text-xl font-extrabold tracking-tight text-foreground flex items-center gap-1.5">
-                LabSense <span className="text-[10px] font-semibold bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded-full uppercase tracking-wider">freud UI</span>
+                LabSense <span className="text-[10px] font-semibold bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded-full uppercase tracking-wider">AI Medical</span>
               </div>
               <div className="text-xs text-muted-foreground font-medium">AI Health & Diagnostics</div>
             </div>
@@ -60,7 +60,7 @@ const AppLayout = () => {
                   className={cn(
                     "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-200",
                     isActive
-                      ? "bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-md freud-glow-indigo"
+                      ? "bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-md glow-indigo"
                       : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-800/50"
                   )}
                 >
@@ -181,10 +181,10 @@ const AppLayout = () => {
 
       <UserProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
 
-      {/* Freud Footer */}
+      {/* LabSense Footer */}
       <footer className="container mx-auto py-8 text-center text-xs text-muted-foreground border-t border-border mt-12 flex flex-col items-center gap-2">
         <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-semibold tracking-wide">
-          <Sparkles className="h-3.5 w-3.5" /> Freud UI Kit & Medical Intelligence Engine
+          <Sparkles className="h-3.5 w-3.5" /> LabSense AI Health & Clinical Intelligence Engine
         </div>
         <p>This application is for informational purposes. Always consult a licensed physician for medical diagnoses.</p>
       </footer>

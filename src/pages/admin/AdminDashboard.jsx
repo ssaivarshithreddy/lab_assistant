@@ -264,10 +264,10 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans selection:bg-indigo-500/30 transition-colors duration-300">
-      {/* Freud UI Glassmorphic Header */}
-      <header className="sticky top-0 z-40 freud-glass border-b border-border shadow-md px-4 lg:px-8 py-4 flex flex-wrap items-center justify-between gap-4">
+      {/* Glassmorphic Header */}
+      <header className="sticky top-0 z-40 glass-panel border-b border-border shadow-md px-4 lg:px-8 py-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-tr from-amber-500 via-orange-500 to-red-500 text-white font-bold shadow-lg freud-glow-indigo">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-tr from-amber-500 via-orange-500 to-red-500 text-white font-bold shadow-lg glow-indigo">
             <Database className="h-6 w-6" />
           </div>
           <div>
@@ -358,7 +358,7 @@ export default function AdminDashboard() {
             ) : (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <Card className="freud-card border-border shadow-lg p-5">
+                  <Card className="glass-card border-border shadow-lg p-5">
                     <CardContent className="p-0 flex items-center justify-between">
                       <div>
                         <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Registered Users</p>
@@ -373,7 +373,7 @@ export default function AdminDashboard() {
                     </CardContent>
                   </Card>
 
-                  <Card className="freud-card border-border shadow-lg p-5">
+                  <Card className="glass-card border-border shadow-lg p-5">
                     <CardContent className="p-0 flex items-center justify-between">
                       <div>
                         <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Lab Reports</p>
@@ -388,13 +388,13 @@ export default function AdminDashboard() {
                     </CardContent>
                   </Card>
 
-                  <Card className="freud-card border-border shadow-lg p-5">
+                  <Card className="glass-card border-border shadow-lg p-5">
                     <CardContent className="p-0 flex items-center justify-between">
                       <div>
                         <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">AI Chat Messages</p>
                         <h3 className="text-3xl font-extrabold text-foreground mt-1">{stats?.totalMessages ?? 0}</h3>
                         <div className="flex items-center gap-1 text-[11px] font-semibold text-purple-600 dark:text-purple-400 mt-1">
-                          <MessageSquare className="h-3 w-3" /> Freud AI History
+                          <MessageSquare className="h-3 w-3" /> LabSense AI History
                         </div>
                       </div>
                       <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
@@ -403,7 +403,7 @@ export default function AdminDashboard() {
                     </CardContent>
                   </Card>
 
-                  <Card className="freud-card border-border shadow-lg p-5">
+                  <Card className="glass-card border-border shadow-lg p-5">
                     <CardContent className="p-0 flex items-center justify-between">
                       <div>
                         <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Storage Occupied</p>
@@ -420,7 +420,7 @@ export default function AdminDashboard() {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <Card className="lg:col-span-2 freud-card border-border p-6">
+                  <Card className="lg:col-span-2 glass-card border-border p-6">
                     <CardHeader className="p-0 pb-4">
                       <CardTitle className="text-base font-bold text-foreground">User Report Distribution</CardTitle>
                     </CardHeader>
@@ -443,7 +443,7 @@ export default function AdminDashboard() {
                     </CardContent>
                   </Card>
 
-                  <Card className="freud-card border-border p-6">
+                  <Card className="glass-card border-border p-6">
                     <CardHeader className="p-0 pb-4">
                       <CardTitle className="text-base font-bold text-foreground">MinIO Storage Usage</CardTitle>
                     </CardHeader>
@@ -477,7 +477,7 @@ export default function AdminDashboard() {
 
           {/* TAB 2: POSTGRESQL TABLE INSPECTOR */}
           <TabsContent value="db_inspector" className="space-y-6">
-            <Card className="freud-card border-border p-6 space-y-6">
+            <Card className="glass-card border-border p-6 space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
                 <div>
                   <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
@@ -496,7 +496,7 @@ export default function AdminDashboard() {
                       className={cn(
                         "rounded-xl text-xs font-bold transition-all border",
                         selectedTable === t.table_name
-                          ? "bg-indigo-600 text-white border-indigo-500 shadow-md freud-glow-indigo"
+                          ? "bg-indigo-600 text-white border-indigo-500 shadow-md glow-indigo"
                           : "bg-card text-muted-foreground border-border hover:bg-muted"
                       )}
                     >
@@ -572,7 +572,7 @@ export default function AdminDashboard() {
 
           {/* TAB 3: SQL QUERY CONSOLE */}
           <TabsContent value="sql_console" className="space-y-6">
-            <Card className="freud-card border-border p-6 space-y-4">
+            <Card className="glass-card border-border p-6 space-y-4">
               <div>
                 <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                   <Terminal className="h-5 w-5 text-indigo-500" /> Interactive PostgreSQL SQL Console
@@ -594,11 +594,14 @@ export default function AdminDashboard() {
                     <Button type="button" variant="outline" size="sm" onClick={() => setSqlInput("SELECT * FROM reports ORDER BY created_at DESC;")} className="text-[11px] h-7 rounded-lg">reports</Button>
                     <Button type="button" variant="outline" size="sm" onClick={() => setSqlInput("SELECT * FROM report_chunks LIMIT 10;")} className="text-[11px] h-7 rounded-lg">report_chunks</Button>
                     <Button type="button" variant="outline" size="sm" onClick={() => setSqlInput("SELECT * FROM chat_messages LIMIT 10;")} className="text-[11px] h-7 rounded-lg">chat_messages</Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setSqlInput("SELECT * FROM email_verifications LIMIT 10;")} className="text-[11px] h-7 rounded-lg">email_verifications</Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setSqlInput("SELECT * FROM phone_verifications LIMIT 10;")} className="text-[11px] h-7 rounded-lg">phone_verifications</Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setSqlInput("SELECT * FROM two_factor_codes LIMIT 10;")} className="text-[11px] h-7 rounded-lg">two_factor_codes</Button>
                   </div>
                   <Button
                     onClick={handleExecuteSql}
                     disabled={sqlBusy || !sqlInput.trim()}
-                    className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl text-xs px-5 shadow-md freud-glow-indigo"
+                    className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl text-xs px-5 shadow-md glow-indigo"
                   >
                     {sqlBusy ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Play className="h-4 w-4 mr-1.5" />}
                     Execute Query
@@ -655,7 +658,7 @@ export default function AdminDashboard() {
 
           {/* TAB 4: MINIO STORAGE EXPLORER */}
           <TabsContent value="minio_explorer" className="space-y-6">
-            <Card className="freud-card border-border p-6 space-y-6">
+            <Card className="glass-card border-border p-6 space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
                 <div>
                   <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
@@ -766,7 +769,7 @@ export default function AdminDashboard() {
 
           {/* TAB 5: USER DIRECTORY & ACCESS CONTROL */}
           <TabsContent value="access_control" className="space-y-6">
-            <Card className="freud-card border-border p-6 space-y-6">
+            <Card className="glass-card border-border p-6 space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
                 <div>
                   <h2 className="text-lg font-bold text-foreground">Registered User Directory & Roles</h2>

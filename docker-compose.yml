@@ -72,6 +72,12 @@ services:
       MINIO_BUCKET: labsense-reports
       JWT_SECRET: supersecret_jwt_key_labsense_2026
       VITE_GROQ_API_KEY: ${VITE_GROQ_API_KEY:-""}
+      SMTP_HOST: ${SMTP_HOST:-""}
+      SMTP_PORT: ${SMTP_PORT:-"587"}
+      SMTP_USER: ${SMTP_USER:-""}
+      SMTP_PASS: ${SMTP_PASS:-""}
+      SMTP_FROM: ${SMTP_FROM:-""}
+      SMTP_SERVICE: ${SMTP_SERVICE:-""}
     depends_on:
       postgres:
         condition: service_healthy

@@ -128,7 +128,7 @@ export default function Appointments() {
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
       {/* Header Banner */}
-      <div className="freud-card rounded-[2rem] p-6 sm:p-8 bg-gradient-to-r from-card via-card to-indigo-500/10 border-indigo-500/20 relative overflow-hidden shadow-xl">
+      <div className="glass-card rounded-[2rem] p-6 sm:p-8 bg-gradient-to-r from-card via-card to-indigo-500/10 border-indigo-500/20 relative overflow-hidden shadow-xl">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2 max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-300 text-xs font-bold uppercase tracking-wider">
@@ -157,10 +157,10 @@ export default function Appointments() {
 
       {/* Smart Specialist Match Banner (If user has abnormal lab values) */}
       {abnormalMetrics.length > 0 && (
-        <Card className="freud-card rounded-3xl border-purple-500/30 bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-card p-6 shadow-lg">
+        <Card className="glass-card rounded-3xl border-purple-500/30 bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-card p-6 shadow-lg">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-start gap-3.5">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-purple-600 text-white shadow-md freud-glow-indigo">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-purple-600 text-white shadow-md glow-indigo">
                 <Sparkles className="h-6 w-6" />
               </div>
               <div>
@@ -226,7 +226,7 @@ export default function Appointments() {
                   className={cn(
                     "rounded-xl text-xs font-bold capitalize transition-all border h-8",
                     selectedCategory === cat
-                      ? "bg-indigo-600 text-white border-indigo-500 shadow-md freud-glow-indigo"
+                      ? "bg-indigo-600 text-white border-indigo-500 shadow-md glow-indigo"
                       : "bg-card text-muted-foreground border-border hover:bg-muted"
                   )}
                 >
@@ -239,7 +239,7 @@ export default function Appointments() {
           {/* Doctors Grid */}
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {filteredDoctors.map((doc) => (
-              <Card key={doc.id} className="freud-card rounded-3xl border-border p-6 space-y-4 hover:border-indigo-500/40 transition-all shadow-lg flex flex-col justify-between">
+              <Card key={doc.id} className="glass-card rounded-3xl border-border p-6 space-y-4 hover:border-indigo-500/40 transition-all shadow-lg flex flex-col justify-between">
                 <div className="space-y-4">
                   <div className="flex items-start gap-4">
                     <img
@@ -278,7 +278,7 @@ export default function Appointments() {
                   </div>
                   <Button
                     onClick={() => setSelectedDoctor(doc)}
-                    className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl text-xs px-4 h-10 shadow-md freud-glow-indigo"
+                    className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl text-xs px-4 h-10 shadow-md glow-indigo"
                   >
                     Book Consultation
                   </Button>
@@ -291,7 +291,7 @@ export default function Appointments() {
         {/* TAB 2: MY BOOKED APPOINTMENTS */}
         <TabsContent value="my_appointments" className="space-y-6">
           {appointments.length === 0 ? (
-            <Card className="freud-card rounded-3xl p-12 text-center border-border space-y-4">
+            <Card className="glass-card rounded-3xl p-12 text-center border-border space-y-4">
               <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-indigo-500/10 text-indigo-500 mx-auto">
                 <CalendarIcon className="h-8 w-8" />
               </div>
@@ -306,7 +306,7 @@ export default function Appointments() {
           ) : (
             <div className="space-y-4">
               {appointments.map((apt) => (
-                <Card key={apt.id} className="freud-card rounded-3xl border-border p-6 shadow-md">
+                <Card key={apt.id} className="glass-card rounded-3xl border-border p-6 shadow-md">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-start gap-4">
                       {apt.doctorImage ? (
@@ -468,7 +468,7 @@ export default function Appointments() {
               <Button
                 onClick={handleBook}
                 disabled={isSubmitting}
-                className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl text-xs px-5 shadow-md freud-glow-indigo"
+                className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl text-xs px-5 shadow-md glow-indigo"
               >
                 Confirm Appointment ({selectedDoctor.fee})
               </Button>

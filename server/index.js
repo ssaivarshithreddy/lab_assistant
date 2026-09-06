@@ -13,6 +13,10 @@ import {
   generateToken,
   requireAdmin,
 } from '../middlewares/authenticationMiddleware.js';
+import { generateMedicalReasoning } from './medicalReasoningService.js';
+import { retrieveServerRagContext } from './ragService.js';
+import { encryptData, decryptData } from './encryptionService.js';
+import { sendOtpEmail } from './emailService.js';
 
 dotenv.config();
 
@@ -137,36 +141,97 @@ function saveFileLocally(objectKey, buffer) {
 // 1. AUTHENTICATION ROUTES
 // ==========================================
 
-// Sign Up
+// Sign Up (With Mandatory Email / Phone OTP Verification Requirement)
 app.post('/api/auth/signup', async (req, res) => {
   try {
-    const { email, password, full_name } = req.body;
+    const { email, password, full_name, phone_number, verification_code, verification_type = 'email' } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    const existing = await query('SELECT id FROM users WHERE email = $1', [email]);
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone = phone_number ? phone_number.trim() : null;
+
+    const existing = await query('SELECT id FROM users WHERE email = $1', [cleanEmail]);
     if (existing.rows.length > 0) {
       return res.status(400).json({ error: 'User with this email already exists' });
     }
 
+    // Enforce OTP Code Verification on Registration
+    if (!verification_code || !verification_code.trim()) {
+      // Auto-trigger OTP generation for convenience
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+      await query('DELETE FROM email_verifications WHERE email = $1', [cleanEmail]);
+      await query('INSERT INTO email_verifications (email, code, expires_at) VALUES ($1, $2, $3)', [
+        cleanEmail,
+        otpCode,
+        expiresAt,
+      ]);
+
+      await sendOtpEmail(cleanEmail, otpCode, 'Registration');
+
+      return res.status(422).json({
+        requires_verification: true,
+        message: `Please enter the 6-digit OTP code sent to ${cleanEmail} to verify your identity and complete registration.`,
+        email: cleanEmail,
+        code_dev: otpCode,
+      });
+    }
+
+    // Validate the OTP Code provided by the user
+    let validOtp = false;
+    if (verification_type === 'phone' && cleanPhone) {
+      const pRes = await query(
+        'SELECT * FROM phone_verifications WHERE phone_number = $1 AND code = $2 AND expires_at > NOW()',
+        [cleanPhone, verification_code.trim()]
+      );
+      if (pRes.rows.length > 0) {
+        validOtp = true;
+        await query('DELETE FROM phone_verifications WHERE phone_number = $1', [cleanPhone]);
+      }
+    } else {
+      const eRes = await query(
+        'SELECT * FROM email_verifications WHERE email = $1 AND code = $2 AND expires_at > NOW()',
+        [cleanEmail, verification_code.trim()]
+      );
+      if (eRes.rows.length > 0) {
+        validOtp = true;
+        await query('DELETE FROM email_verifications WHERE email = $1', [cleanEmail]);
+      }
+    }
+
+    if (!validOtp) {
+      return res.status(400).json({ error: 'Invalid or expired 6-digit verification code' });
+    }
+
     const password_hash = await bcrypt.hash(password, 10);
     const userRes = await query(
-      'INSERT INTO users (email, password_hash, full_name) VALUES ($1, $2, $3) RETURNING id, email, full_name, role, created_at',
-      [email, password_hash, full_name || '']
+      `INSERT INTO users (email, password_hash, full_name, phone_number, email_verified, phone_verified)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, email, full_name, phone_number, role, created_at, email_verified, phone_verified`,
+      [
+        cleanEmail,
+        password_hash,
+        full_name ? full_name.trim() : '',
+        cleanPhone,
+        verification_type === 'email',
+        verification_type === 'phone',
+      ]
     );
 
     const user = userRes.rows[0];
 
     // Create profile entry
     await query(
-      'INSERT INTO profiles (id, full_name, email) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING',
-      [user.id, user.full_name, user.email]
+      'INSERT INTO profiles (id, full_name, email, phone_number, email_verified, phone_verified) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING',
+      [user.id, user.full_name, user.email, user.phone_number, user.email_verified, user.phone_verified]
     );
 
     const token = generateToken(user);
-    res.json({ token, user });
+    res.json({ token, user, message: 'Account created and identity verified successfully!' });
   } catch (err) {
     console.error('Signup Error:', err.message);
     if (err.message.includes('authentication failed') || err.message.includes('ECONNREFUSED')) {
@@ -212,6 +277,28 @@ app.post('/api/auth/signin', async (req, res) => {
     }
 
     delete user.password_hash;
+
+    // Check if 2FA is enabled for this user
+    if (user.two_factor_enabled) {
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+
+      await query('DELETE FROM two_factor_codes WHERE user_id = $1', [user.id]);
+      await query(
+        'INSERT INTO two_factor_codes (user_id, code, expires_at) VALUES ($1, $2, $3)',
+        [user.id, otpCode, expiresAt]
+      );
+
+      await sendOtpEmail(user.email, otpCode, 'Two-Factor Authentication');
+
+      return res.json({
+        requires_2fa: true,
+        message: 'Two-Factor Authentication OTP code sent to your email/device',
+        user_id: user.id,
+        email: user.email,
+      });
+    }
+
     const token = generateToken(user);
     res.json({ token, user });
   } catch (err) {
@@ -222,6 +309,209 @@ app.post('/api/auth/signin', async (req, res) => {
       });
     }
     res.status(500).json({ error: err.message || 'Failed to sign in' });
+  }
+});
+
+// Verify 2FA OTP Code
+app.post('/api/auth/verify-2fa', async (req, res) => {
+  try {
+    const { user_id, code } = req.body;
+    if (!user_id || !code) {
+      return res.status(400).json({ error: 'User ID and 2FA code are required' });
+    }
+
+    const otpRes = await query(
+      'SELECT * FROM two_factor_codes WHERE user_id = $1 AND code = $2 AND expires_at > NOW()',
+      [user_id, code.trim()]
+    );
+
+    if (otpRes.rows.length === 0) {
+      return res.status(400).json({ error: 'Invalid or expired 2FA security code' });
+    }
+
+    await query('DELETE FROM two_factor_codes WHERE user_id = $1', [user_id]);
+
+    const userRes = await query('SELECT id, email, full_name, phone_number, role, created_at, email_verified, phone_verified, two_factor_enabled FROM users WHERE id = $1', [user_id]);
+    const user = userRes.rows[0];
+
+    const token = generateToken(user);
+    res.json({ success: true, token, user });
+  } catch (err) {
+    console.error('2FA Verification Error:', err.message);
+    res.status(500).json({ error: 'Failed to verify 2FA code' });
+  }
+});
+
+// Toggle 2FA in user profile settings
+app.post('/api/auth/2fa/toggle', authenticateJWT, async (req, res) => {
+  try {
+    const { enabled } = req.body;
+    const isEnabled = Boolean(enabled);
+
+    await query('UPDATE users SET two_factor_enabled = $1 WHERE id = $2', [isEnabled, req.user.id]);
+    res.json({
+      success: true,
+      message: `Two-Factor Authentication ${isEnabled ? 'enabled' : 'disabled'} successfully`,
+      two_factor_enabled: isEnabled,
+    });
+  } catch (err) {
+    console.error('Toggle 2FA Error:', err.message);
+    res.status(500).json({ error: 'Failed to update 2FA settings' });
+  }
+});
+
+// Email Verification: Send OTP (Supports both pre-login signup and authenticated profile)
+app.post('/api/auth/send-email-otp', async (req, res) => {
+  try {
+    const { email } = req.body;
+    let targetEmail = email ? email.trim().toLowerCase() : null;
+
+    // Check optional Authorization header if present
+    const authHeader = req.headers.authorization;
+    if (!targetEmail && authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.split(' ')[1];
+        const jwt = (await import('jsonwebtoken')).default;
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'labsense_jwt_secret_key_default');
+        targetEmail = decoded.email;
+      } catch (e) {}
+    }
+
+    if (!targetEmail) {
+      return res.status(400).json({ error: 'Email address is required to send verification code' });
+    }
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+
+    await query('DELETE FROM email_verifications WHERE email = $1', [targetEmail]);
+    await query('INSERT INTO email_verifications (email, code, expires_at) VALUES ($1, $2, $3)', [
+      targetEmail,
+      otpCode,
+      expiresAt,
+    ]);
+
+    await sendOtpEmail(targetEmail, otpCode, 'Email Verification');
+    res.json({ success: true, message: `Email verification code sent to ${targetEmail}`, code_dev: otpCode });
+  } catch (err) {
+    console.error('Send Email OTP Error:', err.message);
+    res.status(500).json({ error: 'Failed to send email verification code' });
+  }
+});
+
+// Email Verification: Verify OTP (Supports pre-login signup and profile)
+app.post('/api/auth/verify-email-otp', async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    let targetEmail = email ? email.trim().toLowerCase() : null;
+
+    const authHeader = req.headers.authorization;
+    if (!targetEmail && authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.split(' ')[1];
+        const jwt = (await import('jsonwebtoken')).default;
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'labsense_jwt_secret_key_default');
+        targetEmail = decoded.email;
+      } catch (e) {}
+    }
+
+    if (!code || !targetEmail) return res.status(400).json({ error: 'Email address and verification code are required' });
+
+    const otpRes = await query(
+      'SELECT * FROM email_verifications WHERE email = $1 AND code = $2 AND expires_at > NOW()',
+      [targetEmail, code.trim()]
+    );
+
+    if (otpRes.rows.length === 0) {
+      return res.status(400).json({ error: 'Invalid or expired email verification code' });
+    }
+
+    await query('DELETE FROM email_verifications WHERE email = $1', [targetEmail]);
+    await query('UPDATE users SET email_verified = TRUE WHERE email = $1', [targetEmail]);
+    await query('UPDATE profiles SET email_verified = TRUE WHERE email = $1', [targetEmail]);
+
+    res.json({ success: true, message: 'Email address verified successfully!' });
+  } catch (err) {
+    console.error('Verify Email OTP Error:', err.message);
+    res.status(500).json({ error: 'Failed to verify email code' });
+  }
+});
+
+// Phone Verification: Send OTP
+app.post('/api/auth/send-phone-otp', async (req, res) => {
+  try {
+    const { phone_number } = req.body;
+    let targetPhone = phone_number ? phone_number.trim() : null;
+
+    const authHeader = req.headers.authorization;
+    if (!targetPhone && authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.split(' ')[1];
+        const jwt = (await import('jsonwebtoken')).default;
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'labsense_jwt_secret_key_default');
+        targetPhone = decoded.phone_number;
+      } catch (e) {}
+    }
+
+    if (!targetPhone) {
+      return res.status(400).json({ error: 'Phone number is required for verification' });
+    }
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+    await query('DELETE FROM phone_verifications WHERE phone_number = $1', [targetPhone]);
+    await query('INSERT INTO phone_verifications (phone_number, code, expires_at) VALUES ($1, $2, $3)', [
+      targetPhone,
+      otpCode,
+      expiresAt,
+    ]);
+
+    console.log(`[PHONE SMS VERIFICATION OTP] Sent Code for ${targetPhone}: ${otpCode}`);
+    res.json({ success: true, message: `Phone SMS OTP code sent to ${targetPhone}`, code_dev: otpCode });
+  } catch (err) {
+    console.error('Send Phone OTP Error:', err.message);
+    res.status(500).json({ error: 'Failed to send phone verification SMS' });
+  }
+});
+
+// Phone Verification: Verify OTP
+app.post('/api/auth/verify-phone-otp', async (req, res) => {
+  try {
+    const { phone_number, code } = req.body;
+    let targetPhone = phone_number ? phone_number.trim() : null;
+
+    const authHeader = req.headers.authorization;
+    if (!targetPhone && authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.split(' ')[1];
+        const jwt = (await import('jsonwebtoken')).default;
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'labsense_jwt_secret_key_default');
+        targetPhone = decoded.phone_number;
+      } catch (e) {}
+    }
+
+    if (!code || !targetPhone) {
+      return res.status(400).json({ error: 'Phone number and verification code are required' });
+    }
+
+    const otpRes = await query(
+      'SELECT * FROM phone_verifications WHERE phone_number = $1 AND code = $2 AND expires_at > NOW()',
+      [targetPhone, code.trim()]
+    );
+
+    if (otpRes.rows.length === 0) {
+      return res.status(400).json({ error: 'Invalid or expired phone SMS verification code' });
+    }
+
+    await query('DELETE FROM phone_verifications WHERE phone_number = $1', [targetPhone]);
+    await query('UPDATE users SET phone_verified = TRUE, phone_number = $1 WHERE phone_number = $1', [targetPhone]);
+    await query('UPDATE profiles SET phone_verified = TRUE, phone_number = $1 WHERE phone_number = $1', [targetPhone]);
+
+    res.json({ success: true, message: 'Phone number verified successfully!' });
+  } catch (err) {
+    console.error('Verify Phone OTP Error:', err.message);
+    res.status(500).json({ error: 'Failed to verify phone code' });
   }
 });
 
@@ -340,18 +630,19 @@ app.post('/api/reports', authenticateJWT, upload.single('file'), async (req, res
         saveFileLocally(object_key, req.file.buffer);
         file_path = `/api/reports/file-stream/${encodeURIComponent(object_key)}`;
       }
-    }
-
-    let parsedValues = {};
+    }    let parsedValues = {};
     if (typeof values === 'string') {
       try { parsedValues = JSON.parse(values); } catch (e) {}
     } else if (typeof values === 'object' && values !== null) {
       parsedValues = values;
     }
 
+    // Compute 4-step Medical Reasoning Chain on the server
+    const medicalReasoning = generateMedicalReasoning(parsedValues, summary);
+
     const reportRes = await query(
-      `INSERT INTO reports (user_id, file_name, object_key, file_path, raw_text, values, summary)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO reports (user_id, file_name, object_key, file_path, raw_text, values, summary, medical_reasoning)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
         req.user.id,
@@ -361,6 +652,7 @@ app.post('/api/reports', authenticateJWT, upload.single('file'), async (req, res
         raw_text || '',
         JSON.stringify(parsedValues),
         summary || '',
+        JSON.stringify(medicalReasoning),
       ]
     );
 
@@ -383,72 +675,54 @@ app.post('/api/reports', authenticateJWT, upload.single('file'), async (req, res
   }
 });
 
+// Get Server-Processed Medical Reasoning for a Report
+app.get('/api/reports/:id/reasoning', authenticateJWT, async (req, res) => {
+  try {
+    const reportRes = await query(
+      'SELECT values, summary, medical_reasoning FROM reports WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (reportRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+    const r = reportRes.rows[0];
+    let reasoning = r.medical_reasoning;
+    if (!reasoning || !reasoning.step1 || !reasoning.step1.observations) {
+      reasoning = generateMedicalReasoning(r.values, r.summary);
+      await query('UPDATE reports SET medical_reasoning = $1 WHERE id = $2', [
+        JSON.stringify(reasoning),
+        req.params.id,
+      ]);
+    }
+    res.json(reasoning);
+  } catch (err) {
+    console.error('Fetch Reasoning Error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch medical reasoning' });
+  }
+});
+
 // ==========================================
-// RAG (RETRIEVAL-AUGMENTED GENERATION) SEARCH ROUTE
+// SERVER-SIDE RAG SEARCH ROUTE
 // ==========================================
 app.post('/api/rag/search', authenticateJWT, async (req, res) => {
   try {
-    const { query: searchQuery, report_id, top_k = 5 } = req.body;
+    const { query: searchQuery, report_id, active_values, top_k = 5 } = req.body;
     if (!searchQuery || !searchQuery.trim()) {
       return res.status(400).json({ error: 'Search query is required' });
     }
 
-    const q = searchQuery.trim().toLowerCase();
-
-    let rows = [];
-    if (report_id) {
-      const searchRes = await query(
-        `SELECT rc.*, r.created_at as report_created_at
-         FROM report_chunks rc
-         JOIN reports r ON rc.report_id = r.id
-         WHERE rc.user_id = $1 AND rc.report_id = $2
-           AND (rc.chunk_text ILIKE $3 OR rc.metrics_text ILIKE $3)
-         ORDER BY rc.chunk_index ASC
-         LIMIT $4`,
-        [req.user.id, report_id, `%${q}%`, top_k]
-      );
-      rows = searchRes.rows;
-    } else {
-      const searchRes = await query(
-        `SELECT rc.*, r.created_at as report_created_at
-         FROM report_chunks rc
-         JOIN reports r ON rc.report_id = r.id
-         WHERE rc.user_id = $1
-           AND (rc.chunk_text ILIKE $2 OR rc.metrics_text ILIKE $2 OR rc.file_name ILIKE $2)
-         ORDER BY r.created_at DESC, rc.chunk_index ASC
-         LIMIT $3`,
-        [req.user.id, `%${q}%`, top_k]
-      );
-      rows = searchRes.rows;
-    }
-
-    // Fallback if no strict ILIKE matches found: return top recent report chunks
-    if (rows.length === 0) {
-      const fallbackRes = await query(
-        `SELECT rc.*, r.created_at as report_created_at
-         FROM report_chunks rc
-         JOIN reports r ON rc.report_id = r.id
-         WHERE rc.user_id = $1
-         ORDER BY r.created_at DESC, rc.chunk_index ASC
-         LIMIT $2`,
-        [req.user.id, top_k]
-      );
-      rows = fallbackRes.rows;
-    }
-
-    res.json({
-      chunks: rows.map((r) => ({
-        id: r.id,
-        report_id: r.report_id,
-        file_name: r.file_name,
-        chunk_text: r.chunk_text,
-        metrics_text: r.metrics_text,
-        created_at: r.report_created_at || r.created_at,
-      })),
+    const ragResult = await retrieveServerRagContext({
+      queryText: searchQuery,
+      userId: req.user.id,
+      reportId: report_id,
+      topK: top_k,
+      activeValues: active_values,
     });
+
+    res.json(ragResult);
   } catch (err) {
     console.error('RAG Search Error:', err.message);
-    res.status(500).json({ error: 'Failed to search report chunks' });
+    res.status(500).json({ error: 'Failed to process server RAG search' });
   }
 });
 
@@ -610,6 +884,67 @@ app.post('/api/chat', authenticateJWT, async (req, res) => {
   }
 });
 
+// Delete Chat Messages / Session Thread
+app.delete('/api/chat', authenticateJWT, async (req, res) => {
+  try {
+    const { report_id } = req.query;
+
+    const isReportSpecific =
+      report_id && report_id !== 'null' && report_id !== 'undefined' && report_id !== 'null';
+
+    if (isReportSpecific) {
+      await query('DELETE FROM chat_messages WHERE user_id = $1 AND report_id = $2', [
+        req.user.id,
+        report_id,
+      ]);
+      res.json({ success: true, message: 'Chat thread for report deleted' });
+    } else {
+      await query('DELETE FROM chat_messages WHERE user_id = $1 AND report_id IS NULL', [
+        req.user.id,
+      ]);
+      res.json({ success: true, message: 'General chat thread deleted' });
+    }
+  } catch (err) {
+    console.error('Delete Chat Error:', err.message);
+    res.status(500).json({ error: 'Failed to delete chat thread' });
+  }
+});
+
+// Delete All Chat History for Authenticated User
+app.delete('/api/chat/all', authenticateJWT, async (req, res) => {
+  try {
+    await query('DELETE FROM chat_messages WHERE user_id = $1', [req.user.id]);
+    res.json({ success: true, message: 'All chat history cleared successfully' });
+  } catch (err) {
+    console.error('Clear All Chat Error:', err.message);
+    res.status(500).json({ error: 'Failed to clear chat history' });
+  }
+});
+
+// Get Chat Threads Overview
+app.get('/api/chat/threads', authenticateJWT, async (req, res) => {
+  try {
+    const threadsRes = await query(
+      `SELECT 
+         cm.report_id,
+         r.file_name,
+         COUNT(cm.id)::int as message_count,
+         MAX(cm.created_at) as last_activity
+       FROM chat_messages cm
+       LEFT JOIN reports r ON cm.report_id = r.id
+       WHERE cm.user_id = $1
+       GROUP BY cm.report_id, r.file_name
+       ORDER BY last_activity DESC`,
+      [req.user.id]
+    );
+
+    res.json(threadsRes.rows);
+  } catch (err) {
+    console.error('Fetch Chat Threads Error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch chat threads' });
+  }
+});
+
 // ==========================================
 // 4. ADMIN ROUTES
 // ==========================================
@@ -714,19 +1049,14 @@ app.delete('/api/admin/users/:id', authenticateJWT, requireAdmin, async (req, re
   }
 });
 
-// Admin Update User Role
-app.patch('/api/admin/users/:id/role', authenticateJWT, async (req, res) => {
+// Admin Update User Role (Strict Admin Authorization Required)
+app.patch('/api/admin/users/:id/role', authenticateJWT, requireAdmin, async (req, res) => {
   try {
     const targetUserId = req.params.id;
     const { role } = req.body;
 
     if (!['user', 'admin'].includes(role)) {
       return res.status(400).json({ error: 'Role must be either "user" or "admin"' });
-    }
-
-    // Require admin OR self-switch
-    if (req.user.role !== 'admin' && targetUserId !== req.user.id) {
-      return res.status(403).json({ error: 'Admin access required to update other users' });
     }
 
     const userRes = await query('SELECT id, email, full_name, role FROM users WHERE id = $1', [targetUserId]);
@@ -796,6 +1126,168 @@ app.delete('/api/admin/reports/:id', authenticateJWT, requireAdmin, async (req, 
   } catch (err) {
     console.error('Admin Delete Report Error:', err.message);
     res.status(500).json({ error: 'Failed to delete report' });
+  }
+});
+
+// ==========================================
+// 5. POSTGRESQL DATABASE MANAGEMENT PORTAL ROUTES
+// ==========================================
+
+// Admin DB Portal: Get List of All Database Tables & Schema Overview
+app.get('/api/admin/db/tables', authenticateJWT, requireAdmin, async (req, res) => {
+  try {
+    const tablesRes = await query(`
+      SELECT 
+        t.table_name,
+        (SELECT COUNT(*)::int FROM information_schema.columns WHERE table_name = t.table_name) as column_count,
+        pg_size_pretty(pg_total_relation_size('"' || t.table_name || '"')) as total_size,
+        pg_total_relation_size('"' || t.table_name || '"')::int as size_bytes
+      FROM information_schema.tables t
+      WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
+      ORDER BY t.table_name ASC;
+    `);
+
+    // Fetch exact row counts per table
+    const tableList = [];
+    for (const row of tablesRes.rows) {
+      try {
+        const countRes = await query(`SELECT COUNT(*)::int as row_count FROM "${row.table_name}"`);
+        tableList.push({
+          ...row,
+          row_count: countRes.rows[0]?.row_count || 0,
+        });
+      } catch (e) {
+        tableList.push({ ...row, row_count: 0 });
+      }
+    }
+
+    res.json(tableList);
+  } catch (err) {
+    console.error('Admin DB Tables Error:', err.message);
+    res.status(500).json({ error: 'Failed to retrieve database tables' });
+  }
+});
+
+// Admin DB Portal: Get Table Columns, Indexes, and Paginated Row Records
+app.get('/api/admin/db/tables/:tableName', authenticateJWT, requireAdmin, async (req, res) => {
+  try {
+    const { tableName } = req.params;
+    const page = parseInt(req.query.page || '1', 10);
+    const limit = parseInt(req.query.limit || '50', 10);
+    const offset = (page - 1) * limit;
+
+    // Validate table existence
+    const checkRes = await query(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1",
+      [tableName]
+    );
+    if (checkRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Table not found in database' });
+    }
+
+    // Get column definitions
+    const columnsRes = await query(
+      `SELECT column_name, data_type, is_nullable, column_default
+       FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = $1
+       ORDER BY ordinal_position ASC`,
+      [tableName]
+    );
+
+    // Get indexes
+    const indexRes = await query(
+      `SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = $1`,
+      [tableName]
+    );
+
+    // Get total rows
+    const countRes = await query(`SELECT COUNT(*)::int as total FROM "${tableName}"`);
+    const totalRows = countRes.rows[0]?.total || 0;
+
+    // Fetch paginated rows
+    const rowsRes = await query(`SELECT * FROM "${tableName}" ORDER BY 1 DESC LIMIT $1 OFFSET $2`, [
+      limit,
+      offset,
+    ]);
+
+    res.json({
+      table_name: tableName,
+      columns: columnsRes.rows,
+      indexes: indexRes.rows,
+      total_rows: totalRows,
+      page,
+      limit,
+      total_pages: Math.ceil(totalRows / limit),
+      rows: rowsRes.rows,
+    });
+  } catch (err) {
+    console.error('Admin DB Table Detail Error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch table details' });
+  }
+});
+
+// Admin DB Portal: Execute Custom SQL Query Console
+app.post('/api/admin/db/query', authenticateJWT, requireAdmin, async (req, res) => {
+  try {
+    const { sql_query } = req.body;
+    if (!sql_query || !sql_query.trim()) {
+      return res.status(400).json({ error: 'SQL query string is required' });
+    }
+
+    const trimmed = sql_query.trim();
+    // Restrict unsafe commands like DROP DATABASE or TRUNCATE in console
+    const lower = trimmed.toLowerCase();
+    if (lower.includes('drop database') || lower.includes('drop schema')) {
+      return res.status(403).json({ error: 'Executing DROP DATABASE or DROP SCHEMA commands is prohibited.' });
+    }
+
+    const startTime = Date.now();
+    const queryRes = await query(trimmed);
+    const executionMs = Date.now() - startTime;
+
+    res.json({
+      success: true,
+      command: queryRes.command,
+      row_count: queryRes.rowCount,
+      execution_ms: executionMs,
+      fields: queryRes.fields ? queryRes.fields.map((f) => f.name) : [],
+      rows: queryRes.rows || [],
+    });
+  } catch (err) {
+    console.error('Admin SQL Console Query Error:', err.message);
+    res.status(400).json({ error: `SQL Query Error: ${err.message}` });
+  }
+});
+
+// Admin DB Portal: PostgreSQL Database Performance & Storage Health Stats
+app.get('/api/admin/db/stats', authenticateJWT, requireAdmin, async (req, res) => {
+  try {
+    const dbSizeRes = await query(`SELECT pg_size_pretty(pg_database_size(current_database())) as total_db_size`);
+    const connRes = await query(`SELECT COUNT(*)::int as active_connections FROM pg_stat_activity WHERE state = 'active'`);
+    const versionRes = await query(`SELECT version()`);
+
+    const tableStatsRes = await query(`
+      SELECT 
+        schemaname || '.' || relname as table_full_name,
+        relname as table_name,
+        n_live_tup as live_rows,
+        n_dead_tup as dead_rows,
+        last_vacuum,
+        last_autovacuum
+      FROM pg_stat_user_tables
+      ORDER BY n_live_tup DESC;
+    `);
+
+    res.json({
+      database_name: process.env.POSTGRES_DB || 'labsense',
+      total_db_size: dbSizeRes.rows[0]?.total_db_size || 'N/A',
+      active_connections: connRes.rows[0]?.active_connections || 1,
+      postgresql_version: versionRes.rows[0]?.version || 'PostgreSQL',
+      tables: tableStatsRes.rows,
+    });
+  } catch (err) {
+    console.error('Admin DB Stats Error:', err.message);
+    res.status(500).json({ error: 'Failed to retrieve database health stats' });
   }
 });
 
