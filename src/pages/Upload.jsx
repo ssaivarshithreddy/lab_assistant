@@ -11,6 +11,7 @@ import { analyzeReport } from "@/lib/analyzeReport";
 import { predictRisk } from "@/lib/predictRisk";
 import { createLocalReport } from "@/lib/localReports";
 import { apiClient } from "@/lib/apiClient";
+import { PrivacyBadge } from "@/components/PrivacyBadge";
 import { cn } from "@/lib/utils";
 
 function mergeAnalysisValues(analysisValues, enrichedValues) {
@@ -130,10 +131,10 @@ const Upload = () => {
 
     return (
       <div className="mx-auto max-w-3xl space-y-8 py-4">
-        {/* Freud UI Title Section */}
+        {/* Title Section */}
         <div className="space-y-3 text-center">
           <div className="inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-4 py-1.5 text-xs font-semibold text-indigo-600 dark:text-indigo-300">
-            <Sparkles className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" /> Freud AI Medical Intelligence
+            <Sparkles className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" /> LabSense AI Medical Intelligence
           </div>
           <h1 className="text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl">
             Upload Your Health Report
@@ -141,17 +142,20 @@ const Upload = () => {
           <p className="text-base text-muted-foreground max-w-xl mx-auto">
             Upload PDF or image lab reports. Our Clinical AI engine extracts parameters and provides instant medical insights.
           </p>
+          <div className="pt-2 max-w-2xl mx-auto">
+            <PrivacyBadge />
+          </div>
         </div>
 
-        {/* Freud UI Glassmorphic Dropzone Card */}
+        {/* Glassmorphic Dropzone Card */}
         <Card
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
           className={cn(
-            "relative cursor-pointer border-2 border-dashed p-12 text-center transition-all duration-300 rounded-3xl freud-card",
+            "relative cursor-pointer border-2 border-dashed p-12 text-center transition-all duration-300 rounded-3xl glass-card",
             dragOver
-              ? "border-indigo-500 bg-indigo-500/10 freud-glow-indigo scale-[1.01]"
+              ? "border-indigo-500 bg-indigo-500/10 glow-indigo scale-[1.01]"
               : "border-border hover:border-indigo-500/50 hover:bg-accent/40"
           )}
           onClick={() => document.getElementById("file-input")?.click()}
@@ -169,7 +173,7 @@ const Upload = () => {
               {previewUrl ? (
                 <img src={previewUrl} alt="preview" className="max-h-52 rounded-2xl border border-border shadow-2xl" />
               ) : (
-                <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-indigo-600/20 text-indigo-500 dark:text-indigo-400 border border-indigo-500/30 freud-glow-indigo">
+                <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-indigo-600/20 text-indigo-500 dark:text-indigo-400 border border-indigo-500/30 glow-indigo">
                   <FileText className="h-10 w-10" />
                 </div>
               )}
@@ -185,7 +189,7 @@ const Upload = () => {
             </div>
           ) : (
             <div className="flex flex-col items-center gap-4">
-              <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-xl freud-glow-indigo">
+              <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-xl glow-indigo">
                 <UploadCloud className="h-10 w-10" />
               </div>
               <div className="space-y-1">
@@ -202,7 +206,7 @@ const Upload = () => {
 
         {/* Progress Display */}
         {busy && (
-          <Card className="space-y-3 p-6 freud-card border-indigo-500/30 rounded-2xl animate-in fade-in duration-300">
+          <Card className="space-y-3 p-6 glass-card border-indigo-500/30 rounded-2xl animate-in fade-in duration-300">
             <div className="flex items-center justify-between text-sm font-semibold">
               <span className="flex items-center gap-2 text-indigo-600 dark:text-indigo-300">
                 <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
@@ -220,10 +224,10 @@ const Upload = () => {
             size="lg"
             onClick={analyze}
             disabled={!file || busy}
-            className="w-full sm:w-auto bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 hover:from-indigo-500 hover:to-pink-400 text-white font-bold text-base px-10 py-6 rounded-2xl shadow-xl freud-glow-indigo disabled:opacity-50 transition-all"
+            className="w-full sm:w-auto bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 hover:from-indigo-500 hover:to-pink-400 text-white font-bold text-base px-10 py-6 rounded-2xl shadow-xl glow-indigo disabled:opacity-50 transition-all"
           >
             {busy ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Sparkles className="mr-2 h-5 w-5" />}
-            Analyze Report with Freud AI
+            Analyze Report with LabSense AI
           </Button>
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
             <ShieldCheck className="h-4 w-4 text-emerald-500 dark:text-emerald-400" /> Processed with End-to-End Privacy. Not medical advice.

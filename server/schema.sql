@@ -24,11 +24,44 @@ CREATE TABLE IF NOT EXISTS profiles (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Ensure phone_number column exists if tables already created
+-- Ensure phone_number, verification, and 2FA columns exist if tables already created
 ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(50);
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS phone_number VARCHAR(50);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_method VARCHAR(20) DEFAULT 'email';
 
--- Reports table (stores lab metrics, summary, raw text, and MinIO object_key)
+-- Email Verifications table
+CREATE TABLE IF NOT EXISTS email_verifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email VARCHAR(255) NOT NULL,
+  code VARCHAR(10) NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Phone Verifications table
+CREATE TABLE IF NOT EXISTS phone_verifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone_number VARCHAR(50) NOT NULL,
+  code VARCHAR(10) NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Two-Factor Security Codes table
+CREATE TABLE IF NOT EXISTS two_factor_codes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  code VARCHAR(10) NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Reports table (stores lab metrics, summary, raw text, medical reasoning, and MinIO object_key)
 CREATE TABLE IF NOT EXISTS reports (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -38,8 +71,12 @@ CREATE TABLE IF NOT EXISTS reports (
   raw_text TEXT,
   values JSONB DEFAULT '{}'::jsonb,
   summary TEXT,
+  medical_reasoning JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure medical_reasoning column exists if table already created
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS medical_reasoning JSONB DEFAULT '{}'::jsonb;
 
 -- Chat Messages table
 CREATE TABLE IF NOT EXISTS chat_messages (

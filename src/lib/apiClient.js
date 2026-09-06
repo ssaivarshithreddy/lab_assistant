@@ -46,6 +46,12 @@ export async function apiFetch(endpoint, options = {}) {
       const errorData = await response.json();
       if (errorData?.error) errorMessage = errorData.error;
     } catch (e) {}
+
+    if (response.status === 401) {
+      removeToken();
+      window.dispatchEvent(new Event('auth:unauthorized'));
+    }
+
     throw new Error(errorMessage);
   }
 
@@ -61,9 +67,15 @@ export async function apiFetch(endpoint, options = {}) {
 }
 
 export const apiClient = {
-  // Auth
+  // Auth & Verification
   signUp: (data) => apiFetch('/auth/signup', { method: 'POST', body: JSON.stringify(data) }),
   signIn: (data) => apiFetch('/auth/signin', { method: 'POST', body: JSON.stringify(data) }),
+  verify2Fa: (data) => apiFetch('/auth/verify-2fa', { method: 'POST', body: JSON.stringify(data) }),
+  toggle2Fa: (enabled) => apiFetch('/auth/2fa/toggle', { method: 'POST', body: JSON.stringify({ enabled }) }),
+  sendEmailOtp: (email) => apiFetch('/auth/send-email-otp', { method: 'POST', body: JSON.stringify({ email }) }),
+  verifyEmailOtp: (data) => apiFetch('/auth/verify-email-otp', { method: 'POST', body: JSON.stringify(typeof data === 'string' ? { code: data } : data) }),
+  sendPhoneOtp: (phone_number) => apiFetch('/auth/send-phone-otp', { method: 'POST', body: JSON.stringify({ phone_number }) }),
+  verifyPhoneOtp: (data) => apiFetch('/auth/verify-phone-otp', { method: 'POST', body: JSON.stringify(data) }),
   getMe: () => apiFetch('/auth/me'),
   updateProfile: (data) => apiFetch('/auth/profile', { method: 'PUT', body: JSON.stringify(data) }),
   changePassword: (data) => apiFetch('/auth/change-password', { method: 'POST', body: JSON.stringify(data) }),
@@ -78,20 +90,30 @@ export const apiClient = {
     }
     return apiFetch('/reports', { method: 'POST', body: JSON.stringify(formDataOrJson) });
   },
+  getReportById: (id) => apiFetch(`/reports/${id}`),
+  getReportReasoning: (id) => apiFetch(`/reports/${id}/reasoning`),
   deleteReport: (id) => apiFetch(`/reports/${id}`, { method: 'DELETE' }),
   getReportFileUrl: (id) => {
     const token = getToken();
     return `${API_BASE_URL}/reports/${id}/file${token ? `?token=${encodeURIComponent(token)}` : ''}`;
   },
 
-  // Chat
-  getChatMessages: (reportId) => apiFetch(`/chat${reportId ? `?report_id=${reportId}` : ''}`),
+  getChatMessages: (reportId) => {
+    const q = reportId && reportId !== 'null' ? `?report_id=${encodeURIComponent(reportId)}` : '';
+    return apiFetch(`/chat${q}`);
+  },
   sendChatMessage: (data) => apiFetch('/chat', { method: 'POST', body: JSON.stringify(data) }),
+  deleteChatMessages: (reportId) => {
+    const q = reportId && reportId !== 'null' ? `?report_id=${encodeURIComponent(reportId)}` : '';
+    return apiFetch(`/chat${q}`, { method: 'DELETE' });
+  },
+  clearAllChatMessages: () => apiFetch('/chat/all', { method: 'DELETE' }),
+  getChatThreads: () => apiFetch('/chat/threads'),
 
   // RAG Search
   searchRagChunks: (data) => apiFetch('/rag/search', { method: 'POST', body: JSON.stringify(data) }),
 
-  // Admin
+  // Admin & DB Portal
   adminLogin: (data) => apiFetch('/admin/login', { method: 'POST', body: JSON.stringify(data) }),
   getAdminStats: () => apiFetch('/admin/stats'),
   getAdminUsers: () => apiFetch('/admin/users'),
@@ -100,8 +122,9 @@ export const apiClient = {
   getAdminReports: () => apiFetch('/admin/reports'),
   deleteAdminReport: (id) => apiFetch(`/admin/reports/${id}`, { method: 'DELETE' }),
   getAdminDbTables: () => apiFetch('/admin/db/tables'),
-  getAdminDbTableRows: (tableName, limit = 50, offset = 0) => apiFetch(`/admin/db/table/${tableName}?limit=${limit}&offset=${offset}`),
-  executeAdminSqlQuery: (sql) => apiFetch('/admin/db/query', { method: 'POST', body: JSON.stringify({ sql }) }),
+  getAdminDbTableDetail: (tableName, page = 1, limit = 50) => apiFetch(`/admin/db/tables/${tableName}?page=${page}&limit=${limit}`),
+  executeAdminSqlQuery: (sql_query) => apiFetch('/admin/db/query', { method: 'POST', body: JSON.stringify({ sql_query }) }),
+  getAdminDbHealthStats: () => apiFetch('/admin/db/stats'),
   reindexReportChunks: (reportId) => apiFetch(`/admin/reports/${reportId}/reindex`, { method: 'POST' }),
   getAdminMinioObjects: () => apiFetch('/admin/minio/objects'),
 };

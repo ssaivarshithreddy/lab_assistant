@@ -7,12 +7,12 @@ import { Badge } from "@/components/ui/badge";
 import { generateMedicalReasoning } from "@/lib/medicalReasoning";
 import { cn } from "@/lib/utils";
 
-export function MedicalReasoningCard({ values, summary, className }) {
+export function MedicalReasoningCard({ values, summary, medicalReasoning, className }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const reasoning = generateMedicalReasoning(values, summary);
-  if (!reasoning || !reasoning.step1.observations.length) {
+  const reasoning = medicalReasoning || generateMedicalReasoning(values, summary);
+  if (!reasoning || !reasoning.step1 || !reasoning.step1.observations || !reasoning.step1.observations.length) {
     return null;
   }
 
@@ -25,10 +25,10 @@ export function MedicalReasoningCard({ values, summary, className }) {
   };
 
   return (
-    <Card className={cn("freud-card rounded-3xl border-indigo-500/30 overflow-hidden shadow-xl", className)}>
+    <Card className={cn("glass-card rounded-3xl border-indigo-500/30 overflow-hidden shadow-xl", className)}>
       <CardHeader className="p-6 bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-card flex flex-row items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-md freud-glow-indigo">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-md glow-indigo">
             <Brain className="h-5 w-5" />
           </div>
           <div>

@@ -69,14 +69,14 @@ const AdminLogin = () => {
           </Button>
         </div>
 
-        <Card className="w-full max-w-md freud-card border-border rounded-3xl shadow-2xl overflow-hidden">
+        <Card className="w-full max-w-md glass-card border-border rounded-3xl shadow-2xl overflow-hidden">
           <CardHeader className="text-center border-b border-border pb-6 pt-8">
             <div className="flex justify-center mb-4">
-              <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-gradient-to-tr from-amber-500 to-red-500 text-white shadow-xl freud-glow-indigo">
+              <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-gradient-to-tr from-amber-500 to-red-500 text-white shadow-xl glow-indigo">
                 <ShieldCheck className="w-8 h-8" />
               </div>
             </div>
-            <CardTitle className="text-2xl font-extrabold text-foreground">Freud Admin Portal</CardTitle>
+            <CardTitle className="text-2xl font-extrabold text-foreground">LabSense Admin Portal</CardTitle>
             <p className="text-xs text-muted-foreground mt-1.5 font-medium">Access system telemetry & user management</p>
           </CardHeader>
 
@@ -128,7 +128,7 @@ const AdminLogin = () => {
               <Button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 hover:from-amber-600 hover:to-red-600 text-white font-bold rounded-2xl py-6 shadow-xl freud-glow-indigo text-base transition-all"
+                className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 hover:from-amber-600 hover:to-red-600 text-white font-bold rounded-2xl py-6 shadow-xl glow-indigo text-base transition-all"
               >
                 {loading ? (
                   <>

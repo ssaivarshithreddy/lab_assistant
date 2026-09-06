@@ -2,10 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Freud UI Kit (by strangehelix.bio) - Dual Light & Dark Mindful AI Healthcare System */
+/* LabSense Medical AI Healthcare System Styles */
 
 @layer base {
-  /* Light Mode (Default Freud Light) */
+  /* Light Mode */
   :root {
     --background: 210 40% 98%;
     --foreground: 222 47% 11%;
@@ -52,7 +52,7 @@
     --shadow-elevated: 0 20px 40px -15px rgba(99, 102, 241, 0.25);
   }
 
-  /* Dark Mode (Freud Dark Obsidian) */
+  /* Dark Mode (Obsidian Dark) */
   .dark {
     --background: 224 71% 4%;
     --foreground: 210 40% 98%;
@@ -105,7 +105,7 @@
     font-family: 'Urbanist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
 
-  /* Light Theme Background Ambient Lights */
+  /* Light Theme Ambient Lights */
   body:not(.dark) {
     background-color: #f8fafc;
     background-image: 
@@ -115,7 +115,7 @@
     background-attachment: fixed;
   }
 
-  /* Dark Theme Background Ambient Lights */
+  /* Dark Theme Ambient Lights */
   .dark body, body.dark {
     background-color: #090d16;
     background-image: 
@@ -140,38 +140,38 @@
     box-shadow: var(--shadow-elevated);
   }
   
-  /* Freud UI Kit Glass & Card Utilities (Light + Dark Responsive) */
-  .freud-glass {
+  /* Glass & Card Utilities */
+  .glass-panel {
     @apply backdrop-blur-xl transition-all duration-300;
   }
-  .dark .freud-glass {
+  .dark .glass-panel {
     background: rgba(15, 23, 42, 0.75);
     border-color: rgba(255, 255, 255, 0.08);
   }
-  body:not(.dark) .freud-glass {
+  body:not(.dark) .glass-panel {
     background: rgba(255, 255, 255, 0.85);
     border-color: rgba(226, 232, 240, 0.9);
   }
 
-  .freud-card {
+  .glass-card {
     @apply backdrop-blur-md transition-all duration-300 rounded-3xl;
   }
-  .dark .freud-card {
+  .dark .glass-card {
     background: linear-gradient(135deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0.75) 100%);
     border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
   }
-  body:not(.dark) .freud-card {
+  body:not(.dark) .glass-card {
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.9) 100%);
     border: 1px solid rgba(226, 232, 240, 0.9);
     box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.05);
   }
 
-  .freud-glow-indigo {
+  .glow-indigo {
     box-shadow: 0 0 25px -5px rgba(99, 102, 241, 0.35);
   }
 
-  .freud-glow-emerald {
+  .glow-emerald {
     box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.35);
   }
 
