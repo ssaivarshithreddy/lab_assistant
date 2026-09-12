@@ -18,11 +18,26 @@ import { retrieveServerRagContext } from './ragService.js';
 import { encryptData, decryptData } from './encryptionService.js';
 import { sendOtpEmail } from './emailService.js';
 
+/**
+ * ============================================================================
+ * LabSense AI - Express Backend Server
+ * ============================================================================
+ * Architecture Overview:
+ *  - Auth & User Management: JWT authentication, 2FA, OTP verification.
+ *  - Report Ingestion: OCR text extraction, metric parsing, MinIO file storage.
+ *  - RAG Engine: Historical report chunk indexing & GIN trigram vector search.
+ *  - Admin Operations: Database inspector, interactive SQL console, storage explorer.
+ * ============================================================================
+ */
+
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+/* -------------------------------------------------------------------------- */
+/*                           MIDDLEWARE SETUP                                 */
+/* -------------------------------------------------------------------------- */
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -33,7 +48,9 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 },
 });
 
-// Initialize PostgreSQL tables, seed admin, and setup MinIO bucket
+/* -------------------------------------------------------------------------- */
+/*                     DATABASE & MINIO SEEDING HELPERS                       */
+/* -------------------------------------------------------------------------- */
 async function seedDefaultAdmin() {
   try {
     const adminEmail = 'admin@labsense.com';

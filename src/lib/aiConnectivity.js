@@ -46,7 +46,7 @@ export async function runAiConnectivityTest() {
       name: "Express Backend API Health",
       ok: Boolean(me?.user),
       details: me?.user
-        ? `Express server running on http://localhost:5000 (Authenticated as ${me.user.email}).`
+        ? `Express server operational (${import.meta.env.VITE_API_BASE_URL || '/api'}) (Authenticated as ${me.user.email}).`
         : "Backend server reachable.",
     });
   } catch (e) {
