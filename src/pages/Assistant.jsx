@@ -52,11 +52,23 @@ const SUGGESTIONS = [
   "What questions should I ask my doctor about these results?",
 ];
 
+/**
+ * ============================================================================
+ * Assistant.jsx - Medical AI Health Assistant Component
+ * ============================================================================
+ * Purpose:
+ *  - Manages real-time medical AI chat sessions with Groq LLM streaming.
+ *  - Incorporates Dual-Source RAG (Retrieval-Augmented Generation) from user reports.
+ *  - Renders 4-step pathophysiological medical reasoning card for active report.
+ *  - Provides admin-only AI connectivity diagnostics.
+ * ============================================================================
+ */
 const Assistant = () => {
   const { user } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
 
+  // State Management
   const [reports, setReports] = useState([]);
   const [report, setReport] = useState(null);
   const [chatThreads, setChatThreads] = useState([]);

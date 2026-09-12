@@ -1,63 +1,133 @@
 # LabSense - AI Lab Assistant
 
-## Project Overview
+## 🏥 Project Overview & Application Motive
 
-LabSense is a full-stack health-tech web application designed for comprehensive lab report analysis, RAG-assisted medical reasoning, and object storage management.
+**LabSense AI** is an intelligent, longitudinal personal health tech platform designed for lab report analysis, parameter trend tracking, and RAG-assisted medical guidance.
 
-### Key Capabilities:
-- **Health Report Processing:** Upload lab reports (PDF/Images) with PDF text extraction + Tesseract OCR fallback.
-- **Deterministic Parameter Extraction:** Regex and clinical rule engine parameter validation for CBC, LFT, KFT, Glycemic, and Lipid panels.
-- **Clinical Medical Reasoning Chain:** 4-step medical rationale (Observation & Triaging → Pathophysiological Mechanisms → Differential Considerations → Physician Questions).
-- **Dual-Source 5-Step RAG Assistant:** Searches Curated Medical Knowledge Base + User Historical Reports.
-- **PostgreSQL Database Inspector & Admin Console:** Interactive table browser, raw SQL query runner, and RAG chunk manager.
-- **MinIO Object Storage & File Manager:** Microservice object storage handling PDF/image uploads with local disk fallback.
-- **Containerized Architecture:** Fully containerized setup via `docker-compose.yml` for Node.js, PostgreSQL, MinIO, and Nginx React UI.
+### Core Application Vision:
+- **Longitudinal Personal Health Profile:** Each user account builds a private, continuous health history timeline. Uploading lab reports regularly enables clear trend visualization across blood, metabolic, renal, and liver panels.
+- **Context-Aware AI Assistant (RAG Engine):** Retrieves insights strictly from the authenticated user's uploaded reports and curated medical guidelines, preventing cross-user data confusion.
+- **Deterministic Parameter Triage:** Combines clinical rule-based validation (normal vs. out-of-reference intervals) with a 4-step pathophysiological medical reasoning chain.
+- **Admin Management & Storage Explorer:** Integrated administration console for PostgreSQL table inspection, raw SQL execution, MinIO S3 object storage management, and user role control.
 
 ---
 
-## Tech Stack
+## 🛠️ Technology Stack
 
-- **Frontend:** React 18, Vite, Tailwind CSS, Lucide React, Recharts, TanStack Query
-- **Backend API:** Node.js, Express, JWT Authentication, Multer
-- **Database:** PostgreSQL 16 (`pg`, `uuid-ossp`, `pg_trgm` trigram search)
-- **Object Storage:** MinIO S3 Object Storage API (`minio`)
-- **AI & RAG Engine:** Groq API (Llama3 model) + Curated Medical Knowledge Base + PostgreSQL GIN Trigram Vector Search
-- **Containerization:** Docker, Docker Compose, Nginx
+| Layer | Technologies Used |
+| :--- | :--- |
+| **Frontend UI** | React 18, Vite, Tailwind CSS, Lucide React, Recharts, TanStack Query |
+| **Backend API** | Node.js, Express 5, JWT Authentication, Multer, Bcrypt |
+| **Database** | PostgreSQL 16 (`pg`, GIN Trigram indexing for RAG vector search) |
+| **Object Storage** | MinIO S3 API Client (`minio`) with local disk fallback (`uploads/`) |
+| **AI / LLM Engine** | Groq API (`qwen3.6-27b`) + Curated Medical Knowledge Base + Client RAG Engine |
+| **Containerization** | Docker, Docker Compose, Nginx SPA proxy |
 
 ---
 
-## Folder Structure
+## 📁 Repository Directory Structure
 
 ```text
-├── server/
-│   ├── index.js              # Express API server & routes
-│   ├── db.js                 # PostgreSQL connection pool
-│   ├── minioClient.js        # MinIO S3 object storage client
-│   ├── schema.sql            # Postgres database migrations & indexes
-│   └── Dockerfile            # Node.js backend Dockerfile
-├── src/
-│   ├── components/           # UI cards, Medical Reasoning cards, layout
-│   ├── features/auth/        # Auth provider & route guards
-│   ├── lib/                  # RAG engine, Medical Knowledge Base, Groq API
-│   ├── pages/                # Upload, Dashboard, Assistant, Admin Portal
-│   └── services/             # Admin stats & API client wrappers
-├── docker-compose.yml        # Docker Compose stack (Postgres, MinIO, Backend, Frontend)
-├── Dockerfile                # Frontend multi-stage Nginx Dockerfile
-└── nginx.conf                # Nginx SPA fallback configuration
+lab_assistant/
+├── server/                           # Express Backend Server
+│   ├── index.js                      # Main Express routes & API handlers
+│   ├── db.js                         # PostgreSQL connection pool & health checks
+│   ├── minioClient.js                # MinIO S3 storage client & local fallback
+│   ├── schema.sql                    # Database migrations, tables & indexes
+│   ├── init-db.js                    # Auto-migration runner on startup
+│   ├── emailService.js               # SMTP / Nodemailer OTP dispatch service
+│   ├── ragService.js                 # Server-side RAG chunk search & indexing
+│   ├── medicalKnowledgeBase.js       # Curated clinical guideline database
+│   ├── medicalReasoningService.js    # 4-step pathophysiological rationale engine
+│   └── Dockerfile                    # Backend container build script
+│
+├── src/                              # React Frontend Application
+│   ├── components/                   # Reusable UI components & layouts
+│   │   ├── AppLayout.jsx             # Top glassmorphic header & mobile navigation
+│   │   ├── UserProfileDialog.jsx     # User profile, 2FA security, & OTP verification
+│   │   ├── MedicalReasoningCard.jsx  # 4-step clinical reasoning card
+│   │   └── ui/                       # Shadcn Tailwind UI components
+│   ├── pages/                        # Page Views
+│   │   ├── Upload.jsx                # Report file upload & OCR parsing
+│   │   ├── Dashboard.jsx             # Health metrics, trend graphs & summaries
+│   │   ├── Assistant.jsx             # RAG-assisted medical AI chat interface
+│   │   └── admin/                    # Admin login & multi-tab management portal
+│   ├── features/auth/                # AuthProvider, ProtectedRoute & AdminRoute
+│   ├── lib/                          # API client, OCR, risk prediction, local fallback
+│   └── tests/                        # Vitest automated test suite
+│
+├── docker-compose.yml                # Multi-container stack definition
+├── Dockerfile                        # Frontend Nginx container build script
+└── README.md                         # Developer documentation & onboarding guide
 ```
 
 ---
 
-## Quick Start with Docker
+## ⚡ Quick Start for Developers
 
-Run the entire application stack with a single command:
+### 1. Local Development (Without Docker)
+
+1. **Install Dependencies:**
+   ```bash
+   npm install
+   ```
+
+2. **Configure Environment Variables:**
+   Create a `.env` file in the root directory (refer to `server/.env.example`):
+   ```env
+   PORT=5000
+   JWT_SECRET=your_jwt_secret_key_here
+   VITE_GROQ_API_KEY=your_groq_api_key_here
+   POSTGRES_HOST=localhost
+   POSTGRES_PORT=5432
+   POSTGRES_USER=postgres
+   POSTGRES_PASSWORD=your_password
+   POSTGRES_DB=lab_assistant
+   ```
+
+3. **Start Development Server (Frontend + Backend):**
+   ```bash
+   npm run dev
+   ```
+   - 🌐 **Frontend App:** `http://localhost:8080` (or Vite assigned port)
+   - ⚙️ **Backend Server:** `http://localhost:5000`
+
+---
+
+### 2. Containerized Start (Docker Compose)
+
+Run the full container stack (PostgreSQL, MinIO, Backend Server, Nginx Frontend):
 
 ```bash
 docker compose up -d
 ```
 
-### Application Endpoints:
-- 🌐 **React Application:** `http://localhost:8080`
-- ⚙️ **Backend API:** `http://localhost:5000/api`
-- 🗄️ **MinIO Storage Console:** `http://localhost:9001` *(User: `minioadmin` / Password: `minioadminpassword`)*
-- 📊 **PostgreSQL Database:** `localhost:5432` *(Database: `lab_assistant`, User: `postgres`, Password: `postgrespassword`)*
+#### Service Endpoints:
+- 🌐 **Web App:** `http://localhost:8080`
+- ⚙️ **Express API:** `http://localhost:5000/api`
+- 🗄️ **MinIO Storage Console:** `http://localhost:9001` *(User: `minioadmin` / Pass: `minioadminpassword`)*
+- 📊 **PostgreSQL Database:** `localhost:5432` *(Database: `lab_assistant`)*
+
+---
+
+## 🧪 Testing & Verification
+
+Run the Vitest test suite to verify security, database models, and AI assistant logic:
+
+```bash
+npm test
+```
+
+Build the production frontend bundle:
+
+```bash
+npm run build
+```
+
+---
+
+## 🔑 Default Admin Credentials
+
+- **Email:** `admin@labsense.com`
+- **Password:** `admin123`
+- **Role:** Administrator (Access to Admin Portal at `/admin/dashboard`)
