@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { cleanModelResponse, validateMessage, isMedicalQuery } from '../lib/groqService';
-import { searchMedicalKnowledgeBase } from '../../server/medicalKnowledgeBase';
-import { generateMedicalReasoning } from '../../server/medicalReasoningService';
+import { searchMedicalKnowledgeBase } from '../lib/medicalKnowledgeBase';
+import { generateMedicalReasoning } from '../lib/medicalReasoning';
 
 describe('Medical AI Assistant Phase 16 Test Suite', () => {
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { encryptData, decryptData } from '../../server/encryptionService';
+import { encryptData, decryptData } from '../encryptionService.js';
 
 describe('LabSense Security, Encryption & Verification Test Suite', () => {
 
