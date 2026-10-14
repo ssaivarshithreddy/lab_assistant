@@ -7,11 +7,42 @@
  * 4. Clinical Action Plan & Physician Questions
  */
 
-export function generateMedicalReasoning(valuesContext = {}, summaryText = "") {
+function normalizeValues(valuesContext) {
   let values = valuesContext || {};
   if (typeof values === "string") {
     try { values = JSON.parse(values); } catch (e) { values = {}; }
   }
+
+  const normalized = {};
+  const aliasMap = {
+    hgb: "hemoglobin",
+    hb: "hemoglobin",
+    plt: "platelets",
+    platelet: "platelets",
+    a1c: "hba1c",
+    cr: "creatinine",
+    glu: "glucose",
+    sgpt: "alt",
+    sgot: "ast",
+    bili: "bilirubin",
+  };
+
+  Object.entries(values).forEach(([rawKey, val]) => {
+    if (val && typeof val === "object") {
+      const lowerKey = rawKey.toLowerCase().trim();
+      const canonicalKey = aliasMap[lowerKey] || lowerKey;
+      normalized[canonicalKey] = {
+        ...val,
+        status: (val.status || "normal").toLowerCase(),
+      };
+    }
+  });
+
+  return normalized;
+}
+
+export function generateMedicalReasoning(valuesContext = {}, summaryText = "") {
+  const values = normalizeValues(valuesContext);
 
   const detectedEntries = Object.entries(values).filter(([, v]) => v?.value != null);
   const abnormalEntries = detectedEntries.filter(([, v]) => v.status === "low" || v.status === "high");
@@ -24,7 +55,7 @@ export function generateMedicalReasoning(valuesContext = {}, summaryText = "") {
     abnormalCount: abnormalEntries.length,
     observations: detectedEntries.map(([key, v]) => ({
       marker: key.toUpperCase(),
-      value: `${v.value} ${v.unit || ""}`,
+      value: `${v.value} ${v.unit || ""}`.trim(),
       status: v.status || "normal",
       isAbnormal: v.status === "low" || v.status === "high",
     })),
@@ -35,19 +66,31 @@ export function generateMedicalReasoning(valuesContext = {}, summaryText = "") {
   const hgb = values.hemoglobin;
   const wbc = values.wbc;
   const rbc = values.rbc;
+  const plt = values.platelets;
   const glu = values.glucose;
+  const hba1c = values.hba1c;
   const alt = values.alt;
   const ast = values.ast;
   const bili = values.bilirubin;
   const cr = values.creatinine;
   const urea = values.urea;
   const bun = values.bun;
+  const crp = values.crp;
+  const na = values.sodium;
+  const k = values.potassium;
+  const ca = values.calcium;
 
   if (hgb?.status === "low" || rbc?.status === "low") {
     mechanisms.push({
       pattern: "Hematologic / Erythroid Pattern",
       description: "Low hemoglobin/RBC indicates reduced erythrocyte mass or hemoglobin concentration, impairing systemic oxygen transport capacity.",
       clinicalNote: "May correlate with iron insufficiency, vitamin deficiency (B12/Folate), or blood loss.",
+    });
+  } else if (hgb?.status === "high" || rbc?.status === "high") {
+    mechanisms.push({
+      pattern: "Erythrocytosis / Hemoconcentration Pattern",
+      description: "Elevated hemoglobin or red blood cell count reflects hemoconcentration or expanded erythroid mass.",
+      clinicalNote: "Often associated with dehydration, hypoxia, or elevated altitude.",
     });
   }
 
@@ -62,6 +105,20 @@ export function generateMedicalReasoning(valuesContext = {}, summaryText = "") {
       pattern: "Immunologic Suppression Pattern",
       description: "Decreased total leucocyte count (leukopenia) indicates diminished circulating neutrophil/lymphocyte reserves.",
       clinicalNote: "Warrants review for viral suppression, bone marrow suppression, or medication effects.",
+    });
+  }
+
+  if (plt?.status === "low") {
+    mechanisms.push({
+      pattern: "Hemostatic / Thrombocytopenia Pattern",
+      description: "Decreased platelet count reduces primary hemostatic plug formation capacity.",
+      clinicalNote: "Warrants review for viral clearance, immune consumption, or medication effects.",
+    });
+  } else if (plt?.status === "high") {
+    mechanisms.push({
+      pattern: "Reactive Thrombocytosis Pattern",
+      description: "Elevated platelet count commonly occurs as a reactive acute-phase inflammatory response or iron deficiency compensation.",
+      clinicalNote: "Evaluate alongside systemic inflammatory markers.",
     });
   }
 
@@ -81,20 +138,50 @@ export function generateMedicalReasoning(valuesContext = {}, summaryText = "") {
     });
   }
 
-  if (glu?.status === "high") {
+  if (glu?.status === "high" || hba1c?.status === "high") {
     mechanisms.push({
       pattern: "Metabolic / Glycemic Pattern",
-      description: "Elevated blood glucose indicates altered peripheral insulin sensitivity or hepatic gluconeogenesis.",
-      clinicalNote: "Requires evaluation regarding fasting state, HbA1c correlation, and metabolic health.",
+      description: "Elevated blood glucose or HbA1c indicates altered peripheral insulin sensitivity, impaired glucose clearance, or chronic hyperglycemia.",
+      clinicalNote: "Requires evaluation regarding fasting state, HbA1c 3-month glycation trends, and metabolic health.",
+    });
+  } else if (glu?.status === "low" || hba1c?.status === "low") {
+    mechanisms.push({
+      pattern: "Hypoglycemic / Energy Deficit Pattern",
+      description: "Subnormal blood glucose or glycated hemoglobin indicates circulating energy substrate deficit.",
+      clinicalNote: "Evaluate regarding nutritional intake, medication dosage, or accelerated RBC turnover.",
+    });
+  }
+
+  if (crp?.status === "high") {
+    mechanisms.push({
+      pattern: "Systemic Acute-Phase Inflammatory Pattern",
+      description: "Elevated C-reactive protein indicates hepatic acute-phase synthesis responding to circulating cytokines.",
+      clinicalNote: "Non-specific inflammatory marker warranting clinical correlation with infectious or autoimmune origins.",
+    });
+  }
+
+  if (na?.status === "low" || na?.status === "high" || k?.status === "low" || k?.status === "high" || ca?.status === "low" || ca?.status === "high") {
+    mechanisms.push({
+      pattern: "Fluid & Electrolyte Homeostatic Pattern",
+      description: "Serum electrolyte deviation indicates altered renal tubular electrolyte handling, hydration variance, or neurohormonal balance.",
+      clinicalNote: "Recommend assessing dietary intake, hydration volume, and diuretic/medication use.",
     });
   }
 
   if (mechanisms.length === 0) {
-    mechanisms.push({
-      pattern: "Homeostatic Balance",
-      description: "All evaluated biomarkers fall within standardized reference intervals, reflecting physiological baseline stability.",
-      clinicalNote: "No overt systemic pathophysiological stress detected among extracted parameters.",
-    });
+    if (abnormalEntries.length > 0) {
+      mechanisms.push({
+        pattern: "Biomarker Variance Under Clinical Review",
+        description: `Variance observed in ${abnormalEntries.map(([k]) => k.toUpperCase()).join(", ")} outside standard reference thresholds.`,
+        clinicalNote: "Correlate with clinical history, physical findings, and prior lab trends.",
+      });
+    } else {
+      mechanisms.push({
+        pattern: "Homeostatic Balance",
+        description: "All evaluated biomarkers fall within standardized reference intervals, reflecting physiological baseline stability.",
+        clinicalNote: "No overt systemic pathophysiological stress detected among extracted parameters.",
+      });
+    }
   }
 
   const step2 = {
@@ -112,24 +199,69 @@ export function generateMedicalReasoning(valuesContext = {}, summaryText = "") {
     });
   } else {
     abnormalEntries.forEach(([key, v]) => {
+      let specificExplanation = `Requires clinical correlation with patient symptoms, physical exam, and baseline history.`;
+      
+      if (key === "hemoglobin" || key === "rbc") {
+        specificExplanation = v.status === "low" 
+          ? "Differential considerations include iron deficiency, B12/folate insufficiency, blood loss, or anemia of chronic inflammation."
+          : "Differential considerations include dehydration, chronic hypoxia, or polycythemic erythrocytosis.";
+      } else if (key === "glucose" || key === "hba1c") {
+        specificExplanation = v.status === "high"
+          ? "Differential considerations include impaired fasting glucose, insulin resistance, metabolic syndrome, or diabetes mellitus."
+          : "Differential considerations include prolonged fasting, strenuous exertion, or excess medication effect.";
+      } else if (key === "wbc") {
+        specificExplanation = v.status === "high"
+          ? "Differential considerations include acute bacterial/viral infection, tissue inflammation, or physiological stress."
+          : "Differential considerations include viral suppression, bone marrow suppression, or medication side effects.";
+      } else if (key === "platelets") {
+        specificExplanation = v.status === "low"
+          ? "Differential considerations include immune thrombocytopenia, viral infection, or medication-induced clearance."
+          : "Differential considerations include reactive thrombocytosis secondary to inflammation or iron deficiency.";
+      } else if (key === "creatinine" || key === "urea" || key === "bun") {
+        specificExplanation = v.status === "high"
+          ? "Differential considerations include prerenal azotemia/dehydration, reduced GFR, or renal parenchymal workload."
+          : "Low level may correlate with decreased muscle mass or increased renal plasma flow.";
+      } else if (key === "alt" || key === "ast" || key === "bilirubin") {
+        specificExplanation = "Differential considerations include metabolic liver changes (fatty liver), medication hepatotoxicity, or viral hepatitis.";
+      } else if (key === "crp") {
+        specificExplanation = "Differential considerations include active bacterial/viral infection, rheumatologic/autoimmune conditions, or tissue stress.";
+      }
+
       differentials.push({
-        finding: `${key.toUpperCase()} (${v.value} ${v.unit || ""}) - ${v.status.toUpperCase()}`,
+        finding: `${key.toUpperCase()} (${v.value} ${v.unit || ""}) - ${v.status.toUpperCase()}`.trim(),
         likelihood: v.status === "high" ? "Elevated Parameter" : "Reduced Parameter",
-        explanation: `Requires clinical correlation with patient symptoms, physical exam, and baseline history.`,
+        explanation: specificExplanation,
       });
     });
   }
 
   const step3 = {
-    title: "3. Differential Risk Considerations & Considerations",
+    title: "3. Differential Risk Considerations",
     differentials,
   };
 
   // Step 4: Clinical Action Plan & Physician Questions
   const physicianQuestions = [];
   if (abnormalEntries.length > 0) {
-    physicianQuestions.push("What underlying physiological factors could be contributing to these specific out-of-range lab results?");
-    physicianQuestions.push("Do you recommend any repeat testing or follow-up panels (e.g. Iron profile, Liver Ultrasound, or HbA1c)?");
+    if (values.hba1c?.status === "high" || values.glucose?.status === "high") {
+      physicianQuestions.push("Does my blood glucose / HbA1c elevation indicate pre-diabetes or diabetes, and what dietary adjustments are recommended?");
+    }
+    if (values.hemoglobin?.status === "low" || values.rbc?.status === "low") {
+      physicianQuestions.push("Should I check an iron profile (ferritin/TIBC) or vitamin B12 levels to investigate low hemoglobin?");
+    }
+    if (values.alt?.status === "high" || values.ast?.status === "high") {
+      physicianQuestions.push("Do you recommend a liver ultrasound or reviewing my medications to evaluate elevated liver enzymes?");
+    }
+    if (values.creatinine?.status === "high") {
+      physicianQuestions.push("What is my estimated GFR (eGFR), and should we repeat kidney function tests with adequate hydration?");
+    }
+    if (values.wbc?.status === "high" || values.crp?.status === "high") {
+      physicianQuestions.push("Does this inflammatory/WBC elevation indicate an active infection or systemic inflammation?");
+    }
+    if (physicianQuestions.length === 0) {
+      physicianQuestions.push("What underlying physiological factors could be contributing to these specific out-of-range lab results?");
+      physicianQuestions.push("Do you recommend any repeat testing or follow-up panels to confirm these readings?");
+    }
     physicianQuestions.push("Are any dietary, lifestyle, or supplement adjustments recommended based on this report?");
   } else {
     physicianQuestions.push("Are all my current lab results optimal for my age and health goals?");

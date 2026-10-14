@@ -29,6 +29,9 @@ export async function sendPasswordReset(email) {
 }
 
 export async function signOut() {
+  try {
+    await apiClient.signOut();
+  } catch (e) {}
   removeToken();
   return { error: null };
 }

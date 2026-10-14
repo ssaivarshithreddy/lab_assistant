@@ -336,7 +336,7 @@ const Dashboard = () => {
           <h2 className="text-xl font-bold text-foreground tracking-tight flex items-center gap-2">
             Extracted Clinical Test Parameters
           </h2>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {METRICS.map((metric) => {
               const item = values[metric.key];
               if (!item || item.value == null) return null;

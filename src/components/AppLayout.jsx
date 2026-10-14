@@ -34,7 +34,7 @@ const AppLayout = () => {
     <div className="min-h-screen bg-background text-foreground font-sans transition-colors duration-300">
       {/* Glassmorphic Header Navigation */}
       <header className="sticky top-0 z-40 glass-panel border-b border-border shadow-md">
-        <div className="container mx-auto flex h-20 items-center justify-between gap-4 px-4 sm:px-6">
+        <div className="container mx-auto max-w-7xl flex h-20 items-center justify-between gap-4 px-4 sm:px-6">
           {/* Brand Logo */}
           <NavLink to="/" className="flex items-center gap-3 group">
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 shadow-lg glow-indigo transition-transform group-hover:scale-105">
@@ -137,7 +137,7 @@ const AppLayout = () => {
         </div>
 
         {/* Mobile Navigation Bar */}
-        <nav className="container mx-auto flex gap-1 overflow-x-auto px-4 pb-3 md:hidden">
+        <nav className="container mx-auto max-w-7xl flex gap-1 overflow-x-auto px-4 pb-3 md:hidden">
           {nav.map(({ to, label, icon: Icon, end }) => {
             const isActive = end ? pathname === "/" : (to !== "/" && pathname.startsWith(to));
             return (
@@ -175,14 +175,14 @@ const AppLayout = () => {
       </header>
 
       {/* Main Content View */}
-      <main className="container mx-auto px-4 sm:px-6 py-8">
+      <main className="container mx-auto max-w-7xl px-4 sm:px-6 py-8">
         <Outlet />
       </main>
 
       <UserProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
 
       {/* LabSense Footer */}
-      <footer className="container mx-auto py-8 text-center text-xs text-muted-foreground border-t border-border mt-12 flex flex-col items-center gap-2">
+      <footer className="container mx-auto max-w-7xl py-8 text-center text-xs text-muted-foreground border-t border-border mt-12 flex flex-col items-center gap-2">
         <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-semibold tracking-wide">
           <Sparkles className="h-3.5 w-3.5" /> LabSense AI Health & Clinical Intelligence Engine
         </div>

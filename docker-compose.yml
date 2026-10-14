@@ -41,7 +41,7 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -51,8 +51,8 @@ services:
   # ==========================================
   backend:
     build:
-      context: ./server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: server/Dockerfile
     container_name: labsense-backend
     restart: always
     ports:
@@ -85,7 +85,7 @@ services:
         condition: service_healthy
 
   # ==========================================
-  # 4. VITE REACT FRONTEND SERVICE
+  # 4. VITE REACT FRONTEND SERVICE (NGINX SPA)
   # ==========================================
   frontend:
     build:

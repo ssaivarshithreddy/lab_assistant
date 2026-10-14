@@ -77,7 +77,7 @@ const Assistant = () => {
   const [busy, setBusy] = useState(false);
   const [diagBusy, setDiagBusy] = useState(false);
   const [diag, setDiag] = useState(null);
-  const [ragMode, setRagMode] = useState(true);
+  const [ragMode, setRagMode] = useState(false);
   const scrollerRef = useRef(null);
 
   // Load User Reports & Chat Threads
@@ -169,8 +169,8 @@ const Assistant = () => {
     }
   };
 
-  const buildLocalAssistantReply = (question) => {
-    const q = (question || "").toLowerCase();
+  const buildLocalAssistantReply = (question, guidelines = []) => {
+    const q = (question || "").toLowerCase().trim();
 
     // Check non-medical triggers
     const nonMedicalTriggers = [
@@ -186,37 +186,150 @@ const Assistant = () => {
     if (typeof values === "string") {
       try { values = JSON.parse(values); } catch (e) {}
     }
-    const hasMetrics = Object.values(values).some((v) => v?.value != null);
-    const summary = report?.summary || "No summary available.";
+    const detected = Object.entries(values).filter(([, v]) => v?.value != null);
+    const abnormal = detected.filter(([, v]) => v?.status === "low" || v?.status === "high");
+    const summary = report?.summary || "No active report summary available.";
 
-    if (!hasMetrics) {
-      return `📌 **Summary of Results:**
-${summary}
+    // 1. Doctor questions inquiry
+    if (q.includes("ask my doctor") || q.includes("questions for doctor") || q.includes("doctor questions") || q.includes("physician")) {
+      const questionsList = abnormal.length > 0
+        ? abnormal.map(([k, v]) => `1. What underlying factors are contributing to my ${v.status.toUpperCase()} ${k.toUpperCase()} (${v.value} ${v.unit || ""})?`).slice(0, 3)
+        : ["1. Are all my lab results within optimal ranges for my health baseline?", "2. When do you recommend scheduling my next screening panel?"];
+
+      return `📌 **Direct Answer:**
+Here are the most important targeted questions to discuss with your physician based on your laboratory report:
+
+${questionsList.join("\n")}
+${abnormal.length > 0 ? "3. Do you recommend any dietary changes or follow-up testing?" : ""}
 
 💡 **What This Means:**
-Standard lab reference ranges were not detected in this file. The response is based directly on the report text.
+Taking structured questions to your appointment ensures your doctor can correlate these specific lab metrics with your personal medical history and symptoms.
 
 🩺 **Questions for Your Doctor:**
-1. Could you review the text findings in this report with me?
-2. Are any follow-up tests or repeat panels recommended?
+- "Are any repeat blood tests recommended to monitor these values?"
+- "Do you recommend any lifestyle or medication adjustments?"
 
 *Disclaimer: This is for educational reference only. Please consult your physician for clinical diagnosis.*`;
     }
 
-    const abnormal = Object.entries(values).filter(([, v]) => v?.status === "low" || v?.status === "high");
-    const abnormalStr = abnormal.map(([k, v]) => `- **${k.toUpperCase()}**: ${v.value} ${v.unit || ""} (${v.status.toUpperCase()})`).join("\n");
+    // 2. Specific biomarker inquiry (e.g., hemoglobin, glucose, hba1c, etc.)
+    const markerAliasMap = {
+      hemoglobin: ["hemoglobin", "hgb", "hb", "anemia"],
+      hba1c: ["hba1c", "a1c", "glycated hemoglobin"],
+      glucose: ["glucose", "sugar", "blood sugar", "diabetes"],
+      wbc: ["wbc", "white blood", "leukocyte", "infection"],
+      rbc: ["rbc", "red blood"],
+      platelets: ["platelet", "platelets", "plt", "clotting"],
+      creatinine: ["creatinine", "kidney", "renal", "gfr"],
+      alt: ["alt", "sgpt", "liver"],
+      ast: ["ast", "sgot"],
+      crp: ["crp", "c-reactive", "inflammation"],
+    };
 
-    return `📌 **Summary of Results:**
-Here is a simple breakdown of your report parameters:
+    let targetKey = null;
+    for (const [key, aliases] of Object.entries(markerAliasMap)) {
+      if (aliases.some((a) => q.includes(a))) {
+        targetKey = key;
+        break;
+      }
+    }
 
-${abnormal.length > 0 ? abnormalStr : "All detected lab metrics fall within standard reference intervals."}
+    if (targetKey) {
+      const foundEntry = detected.find(([k]) => k.toLowerCase() === targetKey);
+      const matchedGuideline = guidelines?.find((g) => g.marker?.toLowerCase().includes(targetKey)) || null;
+
+      if (foundEntry) {
+        const [mKey, mVal] = foundEntry;
+        const valStr = `${mVal.value} ${mVal.unit || ""}`.trim();
+        const status = (mVal.status || "normal").toUpperCase();
+
+        // Check if user has an inverted premise (e.g. asks why it is low when it is high)
+        let correction = "";
+        if (q.includes("low") && status === "HIGH") {
+          correction = `Note: Your report actually classifies ${mKey.toUpperCase()} as **HIGH** (${valStr}), not low. `;
+        } else if (q.includes("high") && status === "LOW") {
+          correction = `Note: Your report actually classifies ${mKey.toUpperCase()} as **LOW** (${valStr}), not high. `;
+        }
+
+        const interpretation = matchedGuideline?.interpretation || (status === "HIGH" ? `Elevated ${mKey.toUpperCase()} indicates values above standard laboratory thresholds.` : status === "LOW" ? `Reduced ${mKey.toUpperCase()} indicates values below standard laboratory thresholds.` : `Your ${mKey.toUpperCase()} is within standard reference ranges.`);
+        const causes = matchedGuideline?.possibleCauses?.length ? matchedGuideline.possibleCauses.slice(0, 3).map((c) => `- ${c}`).join("\n") : "- Physiological variance or lifestyle factors\n- Clinical hydration state or metabolic changes";
+
+        return `📌 **Direct Answer:**
+${correction}Your **${mKey.toUpperCase()}** is recorded at **${valStr}**, which is classified as **${status}**.
+
+💡 **What This Means:**
+${interpretation}
+
+**Potential Considerations:**
+${causes}
+
+🩺 **Questions for Your Doctor:**
+1. What could be the primary cause of this ${status} ${mKey.toUpperCase()} reading?
+2. Do you recommend a repeat test or any follow-up investigation?
+
+*Disclaimer: This is for educational reference only. Please consult your physician for clinical diagnosis.*`;
+      }
+    }
+
+    // 3. Abnormal values inquiry
+    if (q.includes("abnormal") || q.includes("out of range") || q.includes("findings") || q.includes("high") || q.includes("low")) {
+      if (abnormal.length === 0) {
+        return `📌 **Direct Answer:**
+All detected biomarkers in this report fall within standard laboratory reference intervals. No abnormal parameters were identified.
+
+💡 **What This Means:**
+Your results indicate homeostatic baseline stability across the tested markers.
+
+🩺 **Questions for Your Doctor:**
+1. Are my results optimal for my age and health goals?
+2. When should I schedule my next routine screening?
+
+*Disclaimer: This is for educational reference only. Please consult your physician for clinical diagnosis.*`;
+      }
+
+      const abnormalList = abnormal.map(([k, v]) => `- **${k.toUpperCase()}**: ${v.value} ${v.unit || ""} (${v.status.toUpperCase()})`).join("\n");
+      return `📌 **Direct Answer:**
+Your report contains **${abnormal.length}** biomarker(s) outside standard reference intervals:
+
+${abnormalList}
+
+💡 **What This Means:**
+${summary}
+
+🩺 **Questions for Your Doctor:**
+1. What underlying factors are contributing to these out-of-range values?
+2. Do you recommend any lifestyle changes or follow-up blood panels?
+
+*Disclaimer: This is for educational reference only. Please consult your physician for clinical diagnosis.*`;
+    }
+
+    // 4. Default comprehensive report breakdown
+    if (abnormal.length > 0) {
+      const abnormalStr = abnormal.map(([k, v]) => `- **${k.toUpperCase()}**: ${v.value} ${v.unit || ""} (${v.status.toUpperCase()})`).join("\n");
+      return `📌 **Direct Answer:**
+Here is an overview addressing your question regarding **${report?.file_name || "your health report"}**:
+
+${abnormalStr}
 
 💡 **What Your Results Mean:**
 ${summary}
 
 🩺 **Questions for Your Doctor:**
-1. What underlying factors could be contributing to these readings?
-2. Do you recommend any dietary, lifestyle, or follow-up test adjustments?
+1. How do these findings correlate with my overall health and symptoms?
+2. What next steps or follow-up tests are advised?
+
+*Disclaimer: This is for educational reference only. Please consult your physician for clinical diagnosis.*`;
+    }
+
+    return `📌 **Direct Answer:**
+Based on your report **${report?.file_name || "records"}**, all detected laboratory metrics are within standard normal reference intervals.
+
+💡 **Summary of Findings:**
+${summary}
+
+🩺 **Questions for Your Doctor:**
+1. Are these results optimal for my routine wellness screening?
+2. When should I complete my next routine lab evaluation?
 
 *Disclaimer: This is for educational reference only. Please consult your physician for clinical diagnosis.*`;
   };
@@ -259,13 +372,35 @@ ${summary}
       }
       const summary = report?.summary || "No summary available";
 
-      const { ragPromptText, citations, medicalGuidelines } = await retrieveRagContext({
+      const { ragPromptText, citations: rawCitations, medicalGuidelines } = await retrieveRagContext({
         query: text,
         userId: user?.id,
-        reportId: ragMode ? null : report?.id,
+        reportId: report?.id || null,
+        searchAllReports: ragMode,
         activeValues: values,
         topK: 5,
       });
+
+      // Deduplicate citations by report_id
+      const citationsMap = new Map();
+      (rawCitations || []).forEach((c) => {
+        const id = c.report_id || c.file_name;
+        if (id && !citationsMap.has(id)) {
+          citationsMap.set(id, c);
+        }
+      });
+
+      // Ensure active report is cited if user is currently on an active report
+      if (report?.id && !citationsMap.has(report.id)) {
+        citationsMap.set(report.id, {
+          report_id: report.id,
+          file_name: report.file_name,
+          created_at: report.created_at ? new Date(report.created_at).toLocaleDateString() : "Recent",
+          metrics_text: "",
+        });
+      }
+
+      const citations = Array.from(citationsMap.values());
 
       let assistantReply = "";
 
@@ -295,11 +430,11 @@ ${summary}
           setMessages((prev) => [...prev.slice(0, -1), { role: "assistant", content: assistantReply, citations, medicalGuidelines }]);
         } catch (groqErr) {
           console.warn("Groq API failed, using local response:", groqErr);
-          assistantReply = buildLocalAssistantReply(text);
+          assistantReply = buildLocalAssistantReply(text, medicalGuidelines);
           setMessages((prev) => [...prev, { role: "assistant", content: assistantReply, citations, medicalGuidelines }]);
         }
       } else {
-        assistantReply = buildLocalAssistantReply(text);
+        assistantReply = buildLocalAssistantReply(text, medicalGuidelines);
         setMessages((prev) => [...prev, { role: "assistant", content: assistantReply, citations, medicalGuidelines }]);
       }
 
@@ -412,7 +547,7 @@ ${summary}
           </Button>
 
           {/* Chat Threads List */}
-          <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-border">
+          <div className="space-y-2 max-h-[540px] lg:max-h-[580px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-border">
             {/* General AI Health Chat Session */}
             <div
               className={cn(
@@ -522,7 +657,7 @@ ${summary}
           )}
 
           {/* Glass Chat Card */}
-          <Card className="flex h-[560px] flex-col overflow-hidden glass-card rounded-3xl border-border shadow-2xl">
+          <Card className="flex h-[640px] min-h-[520px] flex-col overflow-hidden glass-card rounded-3xl border-border shadow-2xl">
             <div ref={scrollerRef} className="flex-1 space-y-4 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-border">
               {messages.length === 0 && (
                 <div className="flex flex-col items-center justify-center gap-4 py-14 text-center">
@@ -575,23 +710,29 @@ ${summary}
                         </div>
 
                         {/* Evidence Source Report Citations Badges */}
-                        {m.citations && m.citations.length > 0 && (
-                          <div className="mt-3 flex flex-wrap items-center gap-1.5 pt-2.5 border-t border-border/60">
-                            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                              <Search className="h-3 w-3 text-indigo-500" /> Evidence Sources:
-                            </span>
-                            {m.citations.map((c, cIdx) => (
-                              <Link
-                                key={cIdx}
-                                to={`/dashboard/${c.report_id}`}
-                                className="inline-flex items-center gap-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-600 dark:text-indigo-300 hover:bg-indigo-500/20 transition-all shadow-xs"
-                                title={`View source report ${c.file_name}`}
-                              >
-                                <FileText className="h-3 w-3 text-indigo-500" /> {c.file_name} ({c.created_at})
-                              </Link>
-                            ))}
-                          </div>
-                        )}
+                        {m.citations && m.citations.length > 0 && (() => {
+                          const uniqueBadges = Array.from(
+                            new Map(m.citations.map((c) => [c.report_id || c.file_name, c])).values()
+                          );
+                          if (uniqueBadges.length === 0) return null;
+                          return (
+                            <div className="mt-3 flex flex-wrap items-center gap-1.5 pt-2.5 border-t border-border/60">
+                              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                                <Search className="h-3 w-3 text-indigo-500" /> Evidence Sources:
+                              </span>
+                              {uniqueBadges.map((c, cIdx) => (
+                                <Link
+                                  key={c.report_id || cIdx}
+                                  to={`/dashboard/${c.report_id}`}
+                                  className="inline-flex items-center gap-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-600 dark:text-indigo-300 hover:bg-indigo-500/20 transition-all shadow-xs"
+                                  title={`View source report ${c.file_name}`}
+                                >
+                                  <FileText className="h-3 w-3 text-indigo-500" /> {c.file_name} ({c.created_at})
+                                </Link>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </div>
                     ) : (
                       m.content

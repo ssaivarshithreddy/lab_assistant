@@ -5,9 +5,9 @@
  */
 
 const GROQ_MODELS = [
-  "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant",
-  "mixtral-8x7b-32768",
+  "openai/gpt-oss-20b",
+  "qwen/qwen3.8-27b",
+  "openai/gpt-oss-120b",
 ];
 
 /**
@@ -16,10 +16,12 @@ const GROQ_MODELS = [
 export function cleanModelResponse(text = "") {
   if (!text) return "";
   let cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  cleaned = cleaned.replace(/<thought>[\s\S]*?<\/thought>/gi, "");
   cleaned = cleaned.replace(/^Here's a thinking process:[\s\S]*?\n\n/i, "");
   cleaned = cleaned.replace(/^Analyze User Input:[\s\S]*?\n\n/i, "");
   cleaned = cleaned.replace(/^Formulate Response:[\s\S]*?\n\n/i, "");
   cleaned = cleaned.replace(/^Constraint check:[\s\S]*?\n\n/i, "");
+  cleaned = cleaned.replace(/^Thought:[\s\S]*?\n\n/i, "");
   return cleaned.trim();
 }
 
@@ -56,14 +58,14 @@ If the user asks a question that is NOT related to medicine, health, lab tests, 
 
 CRITICAL INSTRUCTIONS:
 1. **NEVER EXPOSE THINKING TRACES:** Do NOT output internal reasoning, <think> tags, "Analyze User Input:", or "Constraint check:".
-2. **PRIORITIZE THE CURRENT USER QUESTION:** Answer the CURRENT USER QUESTION directly. Do not answer an earlier question unless the current user explicitly refers to it.
+2. **PRIORITIZE THE CURRENT USER QUESTION:** Answer the CURRENT USER QUESTION directly. Address whatever specific biomarker, symptom, test, or topic the user asks about. Do NOT answer with unrelated lab markers unless directly relevant.
 3. **AMBIGUOUS PREMISE CORRECTION:** If the user asks an incorrect assumption (e.g. "why HbA1c is low?" when HbA1c = 7.1% HIGH, or "why glucose is less?" when Glucose = 141 mg/dL HIGH), politely correct the misunderstanding FIRST (e.g. "Your report actually classifies HbA1c as HIGH at 7.1%, rather than low."), then explain why it is high.
 4. **DETERMINISTIC NUMERICAL AUTHORITY:** The rule engine classifications (LOW, HIGH, NORMAL) and values (e.g., 141 mg/dL) are immutable facts. Never recalculate or alter numerical values.
-5. **EVIDENCE SUFFICIENCY:** Rely on retrieved medical guidelines. If specific evidence for a biomarker is limited, state so clearly instead of substituting unrelated guidelines.
+5. **EVIDENCE SUFFICIENCY:** Rely on retrieved medical guidelines and report context when available. If the user asks about a general health topic or a biomarker not in the report, answer accurately based on general clinical knowledge while framing it as educational information.
 6. **STRUCTURED PATIENT-FRIENDLY RESPONSE:**
-   - 📌 **Direct Answer:** 1-2 sentence direct response.
-   - 💡 **What This Means:** Clear, easy-to-understand bullet points.
-   - 🩺 **Questions for Your Doctor:** 2 specific questions for their clinician.
+   - 📌 **Direct Answer:** 1-2 sentence direct response to the specific question asked.
+   - 💡 **What This Means:** Clear, easy-to-understand explanations or bullet points.
+   - 🩺 **Questions for Your Doctor:** 1-2 specific questions for their clinician.
 7. **SAFETY DISCLAIMER:** End with *"Disclaimer: This is for educational reference only. Please consult your physician for clinical diagnosis."*
 
 [PATIENT & REPORT CONTEXT]
@@ -180,9 +182,9 @@ export async function streamGroqChat(options) {
  * Non-streaming fallback
  */
 export async function groqChat(options) {
-  const { messages, metricsContext, reportSummary, temperature = 0.7, maxTokens = 1024 } = options;
+  const { messages, metricsContext, reportSummary, ragPromptText, temperature = 0.7, maxTokens = 1024 } = options;
 
-  const systemPrompt = buildSystemPrompt(metricsContext, reportSummary);
+  const systemPrompt = buildSystemPrompt(metricsContext, reportSummary, ragPromptText);
   const apiKey = import.meta.env.VITE_GROQ_API_KEY;
 
   if (!apiKey) {
@@ -193,6 +195,17 @@ export async function groqChat(options) {
 
   for (const model of GROQ_MODELS) {
     try {
+      const formattedHistory = messages.map((m, idx) => {
+        const isCurrent = idx === messages.length - 1;
+        if (isCurrent && m.role === "user") {
+          return {
+            role: "user",
+            content: `[CURRENT USER QUESTION - TOP PRIORITY ANSWER THIS QUESTION]:\n"${m.content}"`,
+          };
+        }
+        return { role: m.role, content: m.content };
+      });
+
       const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -203,7 +216,7 @@ export async function groqChat(options) {
           model,
           messages: [
             { role: "system", content: systemPrompt },
-            ...messages.map((m) => ({ role: m.role, content: m.content })),
+            ...formattedHistory,
           ],
           temperature,
           max_tokens: maxTokens,
@@ -219,7 +232,7 @@ export async function groqChat(options) {
 
       const data = await response.json();
       const content = data.choices?.[0]?.message?.content || "";
-      if (content) return content;
+      if (content) return cleanModelResponse(content);
     } catch (err) {
       lastError = err;
     }

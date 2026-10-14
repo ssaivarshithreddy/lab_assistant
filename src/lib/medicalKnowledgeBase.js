@@ -206,6 +206,36 @@ export const MEDICAL_KNOWLEDGE_BASE = {
       questionsForDoctor: ["Does this indicate active infection or autoimmune inflammation?", "Should we recheck CRP in 2 weeks?"],
     },
   },
+  hba1c: {
+    marker: "HbA1c (Glycated Hemoglobin)",
+    unit: "%",
+    referenceRange: "4.0 - 5.6 % (Normal)",
+    description: "HbA1c reflects average blood glucose levels over the past 2-3 months by measuring the percentage of hemoglobin coated with sugar.",
+    low: {
+      status: "LOW (Decreased HbA1c)",
+      interpretation: "Decreased glycated hemoglobin level, indicating lower average blood sugar or shortened red blood cell lifespan.",
+      possibleCauses: [
+        "Hemolytic anemia or recent blood transfusion (shortened RBC lifespan)",
+        "Chronic kidney disease or erythropoietin therapy",
+        "Recent severe acute blood loss",
+        "Overtreatment with insulin or sulfonylureas in diabetic patients",
+      ],
+      clinicalSignificance: "May reflect hypoglycemia risk or conditions accelerating red blood cell turnover.",
+      questionsForDoctor: ["Does my low HbA1c reflect low blood sugar or fast red blood cell turnover?", "Do I need an anemia or hemoglobinopathy evaluation?"],
+    },
+    high: {
+      status: "HIGH (Elevated HbA1c)",
+      interpretation: "Elevated glycated hemoglobin, reflecting persistent blood glucose elevation over 2-3 months.",
+      possibleCauses: [
+        "Pre-diabetes (HbA1c 5.7% - 6.4%)",
+        "Diabetes mellitus (HbA1c >= 6.5%)",
+        "Insulin resistance or impaired glucose tolerance",
+        "Uncontrolled dietary carbohydrate intake or medication non-compliance",
+      ],
+      clinicalSignificance: "Indicates chronic hyperglycemia and increased microvascular risk.",
+      questionsForDoctor: ["Does my HbA1c level indicate pre-diabetes or diabetes?", "What lifestyle or dietary modifications do you recommend to lower my HbA1c?"],
+    },
+  },
 };
 
 /**
@@ -217,11 +247,12 @@ export function searchMedicalKnowledgeBase(queryText = "", markerKey = "", statu
   const mKey = (markerKey || "").toLowerCase();
 
   Object.entries(MEDICAL_KNOWLEDGE_BASE).forEach(([key, info]) => {
-    const matchesKey = key === mKey || q.includes(key) || q.includes(info.marker.toLowerCase());
-    if (matchesKey || q.includes("guideline") || q.includes("reference") || q.includes("causes")) {
-      const data = info[status] || info.low || info.high || null;
+    const isExplicitMatch = key === mKey || (mKey && info.marker.toLowerCase().includes(mKey)) || q.includes(key) || q.includes(info.marker.toLowerCase());
+    if (isExplicitMatch) {
+      const data = info[status] || info.high || info.low || null;
       if (data) {
         results.push({
+          source_id: `kb_${key}`,
           marker: info.marker,
           unit: info.unit,
           referenceRange: info.referenceRange,

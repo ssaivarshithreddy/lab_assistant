@@ -76,24 +76,64 @@ export async function retrieveServerRagContext(options = {}) {
       params.push(reportId);
     }
 
-    sql += ` ORDER BY rc.created_at DESC LIMIT $${params.length + 1}`;
-    params.push(topK);
+    const stopWords = new Set(["what", "are", "the", "in", "my", "is", "a", "an", "and", "or", "to", "for", "of", "with", "do", "does", "did", "please", "tell", "me", "about", "how", "your", "can", "you"]);
+    const queryKeywords = rawQuery
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !stopWords.has(w));
 
-    const chunkRes = await query(sql, params);
-    chunks = chunkRes.rows || [];
+    // Try keyword relevance search
+    let matchingChunks = [];
+    if (queryKeywords.length > 0) {
+      // Build search conditions for each meaningful keyword
+      const keywordConditions = queryKeywords.map((_, idx) => 
+        `(rc.chunk_text ILIKE $${params.length + 1 + idx} OR rc.metrics_text ILIKE $${params.length + 1 + idx})`
+      ).join(' OR ');
+
+      const searchSql = `${sql} AND (${keywordConditions}) ORDER BY rc.created_at DESC LIMIT $${params.length + 1 + queryKeywords.length}`;
+      const searchParams = [...params, ...queryKeywords.map((k) => `%${k}%`), topK];
+      const searchRes = await query(searchSql, searchParams).catch(() => ({ rows: [] }));
+      matchingChunks = searchRes.rows || [];
+    }
+
+    if (matchingChunks.length > 0) {
+      chunks = matchingChunks;
+    } else if (reportId) {
+      // If asking a general question inside an active report, return that active report's overview chunks
+      const fallbackSql = `${sql} ORDER BY rc.chunk_index ASC, rc.created_at DESC LIMIT $${params.length + 1}`;
+      const chunkRes = await query(fallbackSql, [...params, topK]);
+      chunks = chunkRes.rows || [];
+    } else {
+      // General multi-report chat without specific keywords: return at most 1 chunk per recent report
+      const generalSql = `
+        SELECT DISTINCT ON (rc.report_id) rc.id, rc.report_id, rc.file_name, rc.chunk_text, rc.metrics_text, rc.created_at
+        FROM report_chunks rc
+        WHERE rc.user_id = $1
+        ORDER BY rc.report_id, rc.created_at DESC
+        LIMIT $2
+      `;
+      const chunkRes = await query(generalSql, [userId, topK]).catch(() => ({ rows: [] }));
+      chunks = chunkRes.rows || [];
+    }
   } catch (err) {
     console.warn('Server PostgreSQL RAG query error:', err.message);
   }
 
+  // Deduplicate citations by report_id so a report only appears once
   const citations = [];
+  const seenReportIds = new Set();
   const reportBlocks = chunks.map((c, index) => {
     const reportDate = c.created_at ? new Date(c.created_at).toLocaleDateString() : 'Recent';
-    citations.push({
-      report_id: c.report_id,
-      file_name: c.file_name,
-      created_at: reportDate,
-      metrics_text: c.metrics_text || '',
-    });
+    if (c.report_id && !seenReportIds.has(c.report_id)) {
+      seenReportIds.add(c.report_id);
+      citations.push({
+        report_id: c.report_id,
+        file_name: c.file_name,
+        created_at: reportDate,
+        metrics_text: c.metrics_text || '',
+      });
+    }
 
     return `[USER REPORT #${index + 1}: ${c.file_name} (Uploaded: ${reportDate})]
 ${c.chunk_text}`;
@@ -104,7 +144,7 @@ ${c.chunk_text}`;
 Reference Interval: ${kb.referenceRange} (${kb.unit})
 Classification: ${kb.statusText}
 Clinical Interpretation: ${kb.interpretation}
-Possible Causes: ${kb.possibleCauses.join('; ')}
+Possible Causes: ${kb.possibleCauses ? kb.possibleCauses.join('; ') : 'N/A'}
 Clinical Significance: ${kb.clinicalSignificance}`;
   });
 
@@ -123,14 +163,15 @@ STEP 3: RETRIEVED USER REPORT RECORDS:
 ${reportBlocks.length > 0 ? reportBlocks.join('\n\n---\n\n') : 'No prior user reports found'}
 
 STEP 4: RAG SYSTEM INSTRUCTIONS:
-1. Explain the results using ONLY the deterministic classifications and retrieved medical evidence above.
-2. Do NOT invent medical facts or hallucinate reference ranges.
-3. Clearly state the exact numerical value, unit, and deterministic rule classification (e.g. LOW or HIGH).
+1. Answer the CURRENT USER QUESTION directly. If the user asks about a specific biomarker or topic, address THAT topic directly.
+2. Ground explanations in the deterministic classifications and retrieved medical evidence above when relevant.
+3. Clearly state the exact numerical value, unit, and deterministic rule classification (e.g. LOW or HIGH) if discussing tested biomarkers.
 4. Do NOT diagnose the patient — frame explanations as educational reference.
 5. Highlight when clinician review is appropriate.
 `;
 
   return {
+    chunks,
     ragPromptText,
     citations,
     medicalGuidelines,

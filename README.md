@@ -1,27 +1,187 @@
-# LabSense - AI Lab Assistant
+# 🏥 LabSense AI - Clinical Lab Assistant & Health Intelligence Platform
 
-## 🏥 Project Overview & Application Motive
+[![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?style=flat&logo=vite&logoColor=white)](https://vitejs.dev/)
+[![React](https://img.shields.io/badge/React-18.3-61DAFB?style=flat&logo=react&logoColor=black)](https://react.dev/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-38B2AC?style=flat&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
+[![Express](https://img.shields.io/badge/Express-5.0-000000?style=flat&logo=express&logoColor=white)](https://expressjs.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?style=flat&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![MinIO](https://img.shields.io/badge/MinIO-S3_Storage-C72C48?style=flat&logo=minio&logoColor=white)](https://min.io/)
+[![Docker](https://img.shields.io/badge/Docker_Compose-Supported-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
 
-**LabSense AI** is an intelligent, longitudinal personal health tech platform designed for lab report analysis, parameter trend tracking, and RAG-assisted medical guidance.
+LabSense AI is a full-stack, longitudinal clinical health intelligence application. It extracts medical parameters from patient lab reports (PDF/images), performs rule-based and pathophysiological clinical reasoning, visualizes longitudinal health trends, and powers context-aware medical AI conversations using a Dual-Source Retrieval-Augmented Generation (RAG) pipeline.
 
-### Core Application Vision:
-- **Longitudinal Personal Health Profile:** Each user account builds a private, continuous health history timeline. Uploading lab reports regularly enables clear trend visualization across blood, metabolic, renal, and liver panels.
-- **Context-Aware AI Assistant (RAG Engine):** Retrieves insights strictly from the authenticated user's uploaded reports and curated medical guidelines, preventing cross-user data confusion.
-- **Deterministic Parameter Triage:** Combines clinical rule-based validation (normal vs. out-of-reference intervals) with a 4-step pathophysiological medical reasoning chain.
-- **Admin Management & Storage Explorer:** Integrated administration console for PostgreSQL table inspection, raw SQL execution, MinIO S3 object storage management, and user role control.
+---
+
+## 🌟 Key Application Features
+
+### 1. 📄 Smart Report Ingestion & OCR Parsing
+- Upload lab reports in **PDF, PNG, JPG** formats (up to 15 MB).
+- Client & server-side OCR extracts clinical parameters, reference ranges, and diagnostic notes.
+- Securely stored in **MinIO S3 Object Storage** (with automated local disk fallback in `./uploads`).
+
+### 2. 🧪 Clinical Parameter Triage & Panels
+- Automated detection and reference interval categorization for major lab markers:
+  - **Complete Blood Count (CBC):** Hemoglobin, WBC, RBC, Platelets, Hematocrit, MCV, MCH, MCHC, Neutrophils, Lymphocytes, Monocytes, Eosinophils, Basophils.
+  - **Renal Panel:** Creatinine, Urea, Blood Urea Nitrogen (BUN).
+  - **Electrolytes Panel:** Sodium, Potassium, Chloride, Calcium.
+  - **Hepatic / Liver Panel:** AST (SGOT), ALT (SGPT), ALP, Total Bilirubin.
+  - **Metabolic & Glycemic:** Fasting / Random Blood Glucose, HbA1c.
+  - **Inflammatory Biomarkers:** C-Reactive Protein (CRP).
+
+### 3. 🧠 4-Step Clinical Reasoning Engine
+Every analyzed lab report is triaged through a structured medical reasoning chain:
+1. **Observation & Triaging:** Isolates out-of-reference biomarkers with exact quantitative values.
+2. **Pathophysiological Mechanisms:** Analyzes underlying biological processes (e.g., microcytic anemia, renal clearance impairment).
+3. **Differential Considerations:** Highlights potential causes and clinical patterns to evaluate.
+4. **Physician Action Plan:** Generates tailored questions to guide doctor consultations, complete with one-click clipboard copying.
+
+### 4. 💬 Dual-Source RAG AI Health Assistant
+- **Real-Time Streaming AI:** Connects to Groq LLM API (`openai/gpt-oss-20b`, `qwen/qwen3.8-27b`) with robust offline rule-based fallbacks.
+- **Strict User Isolation:** GIN Trigram vector indexing searches only the authenticated user's uploaded reports and curated clinical reference guidelines.
+- **Evidence Sources:** Transparently cites the exact report files and dates used to answer each query.
+
+### 5. 📈 Longitudinal Trend Visualization
+- Interactive multi-report trend graphs powered by **Recharts**.
+- Visualizes progression of Hemoglobin, WBC, Platelets, and other biomarkers across successive visits.
+
+### 6. 🩺 Specialist Consultation Booking
+- Browse board-certified specialists (Hematologists, Endocrinologists, Hepatologists).
+- Schedule HD Video or In-Person consultations with automated recommendations based on abnormal lab findings.
+
+### 7. 🛡️ Interactive Admin Console (`/admin/dashboard`)
+- **System Telemetry:** Real-time metrics on users, storage usage, reports, and API activity.
+- **PostgreSQL Inspector:** View schemas, row counts, and live table data.
+- **Interactive SQL Console:** Execute queries directly against the database with safety controls.
+- **MinIO Storage Explorer:** Browse, download, inspect, and delete report files stored in buckets.
+- **User Role Management:** Promote users, toggle roles, and manage system access.
+
+### 8. 🎨 Polished Modern UI & Theme System
+- Built on **Urbanist** typography and translucent glassmorphism (`glass-card`, `glass-panel`).
+- **Seamless Theming:** Instant switching between **Light**, **Obsidian Glass Dark** (`#070b14`), and **System** mode.
+- Fully responsive layout bounded for optimal viewing on desktop, ultrawide, tablet, and mobile.
 
 ---
 
 ## 🛠️ Technology Stack
 
-| Layer | Technologies Used |
+| Layer | Technologies |
 | :--- | :--- |
-| **Frontend UI** | React 18, Vite, Tailwind CSS, Lucide React, Recharts, TanStack Query |
-| **Backend API** | Node.js, Express 5, JWT Authentication, Multer, Bcrypt |
-| **Database** | PostgreSQL 16 (`pg`, GIN Trigram indexing for RAG vector search) |
-| **Object Storage** | MinIO S3 API Client (`minio`) with local disk fallback (`uploads/`) |
-| **AI / LLM Engine** | Groq API (`qwen3.6-27b`) + Curated Medical Knowledge Base + Client RAG Engine |
-| **Containerization** | Docker, Docker Compose, Nginx SPA proxy |
+| **Frontend UI** | React 18, Vite, Tailwind CSS, Lucide React, Recharts, Radix UI, TanStack Query |
+| **Theming** | `next-themes` (Light, Dark Obsidian Glass, System) |
+| **Backend API** | Node.js, Express 5, JWT Authentication, Cookie Parser, Multer, Bcrypt |
+| **Database** | PostgreSQL 16 (`pg`, GIN Trigram indexing for RAG search) |
+| **Object Storage** | MinIO S3 API Client (`minio`) with automatic disk fallback (`./uploads`) |
+| **Clinical AI** | Groq Cloud API + Curated Medical Guidelines + Local Rule-Based Engine |
+| **Containerization** | Docker, Docker Compose, Alpine PostgreSQL, MinIO AIStor |
+
+---
+
+## 🚀 Quick Start: Team Setup (Option A — Independent Docker Setup)
+
+If you and your team members are collaborating from different locations, **you do not need to install PostgreSQL or MinIO software manually on your machines**.
+
+All database engines and storage services are managed cleanly via **Docker**.
+
+### Prerequisites
+- [Node.js](https://nodejs.org/) (v18 or higher)
+- [Git](https://git-scm.com/)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (installed and running)
+
+---
+
+### Step-by-Step Developer Setup
+
+#### 1. Clone the Repository
+```bash
+git clone https://github.com/your-username/lab_assistant.git
+cd lab_assistant
+```
+
+#### 2. Install Node Dependencies
+```bash
+npm install
+```
+
+#### 3. Configure Your Environment (`.env`)
+Copy the provided `.env.example` to create your local `.env`:
+```bash
+cp .env.example .env
+```
+*(On Windows PowerShell, run: `Copy-Item .env.example .env`)*
+
+The `.env.example` comes pre-configured with default credentials matching Docker:
+- **PostgreSQL Port:** `5432` | **User:** `postgres` | **Password:** `postgrespassword`
+- **MinIO Port:** `9000` (API) & `9001` (Console) | **User:** `minioadmin` | **Password:** `minioadminpassword`
+- **Optional:** Add your free Groq API Key (`VITE_GROQ_API_KEY`) from [console.groq.com](https://console.groq.com/keys) for live AI chat streaming.
+
+#### 4. Start PostgreSQL & MinIO via Docker
+Run the pre-configured npm script:
+```bash
+npm run docker:up
+```
+*(Or run `docker compose up -d postgres minio` directly).*
+
+Docker will download and boot up PostgreSQL and MinIO in the background. The database schema in `server/schema.sql` and default administrator account will automatically initialize on first launch.
+
+#### 5. Start the Application (Frontend + Backend)
+Run the concurrent development server:
+```bash
+npm run dev
+```
+This single command automatically starts:
+- 🌐 **React Frontend (Vite):** [http://localhost:8080](http://localhost:8080)
+- ⚙️ **Express Backend API:** [http://localhost:5000](http://localhost:5000)
+
+---
+
+### Alternative: Run the Entire Application in Docker
+If you want to run the frontend, backend, database, and storage entirely inside Docker containers without local Node.js:
+```bash
+npm run docker:all
+```
+*(Or run `docker compose up -d --build`)*
+
+---
+
+### Stopping Docker Services
+When you are done developing, stop the background containers with:
+```bash
+npm run docker:down
+```
+
+---
+
+## 🔑 Default Credentials
+
+### Administrator Portal
+- **URL:** [http://localhost:8080/admin/login](http://localhost:8080/admin/login) (or via the Admin Portal link in navigation)
+- **Email:** `admin@labsense.com`
+- **Password:** `admin123`
+- **Permissions:** Full access to DB Inspector, SQL Query Console, MinIO File Explorer, and User Management.
+
+### MinIO Web Console
+- **URL:** [http://localhost:9001](http://localhost:9001)
+- **Username:** `minioadmin`
+- **Password:** `minioadminpassword`
+
+---
+
+## 🧪 Testing & Verification
+
+Run the comprehensive Vitest test suite (verifying RAG engine, AI response formatting, database connectivity, and security models):
+```bash
+npm test
+```
+
+Run tests in watch mode:
+```bash
+npm run test:watch
+```
+
+Test production build compilation:
+```bash
+npm run build
+```
 
 ---
 
@@ -43,91 +203,31 @@ lab_assistant/
 │
 ├── src/                              # React Frontend Application
 │   ├── components/                   # Reusable UI components & layouts
-│   │   ├── AppLayout.jsx             # Top glassmorphic header & mobile navigation
-│   │   ├── UserProfileDialog.jsx     # User profile, 2FA security, & OTP verification
+│   │   ├── AppLayout.jsx             # Responsive glassmorphic layout & navigation
 │   │   ├── MedicalReasoningCard.jsx  # 4-step clinical reasoning card
-│   │   └── ui/                       # Shadcn Tailwind UI components
+│   │   ├── UserProfileDialog.jsx     # Profile settings & 2FA controls
+│   │   ├── MedicalDisclaimer.jsx     # Clinical disclaimers & compliance notices
+│   │   └── ui/                       # Shadcn / Radix Tailwind UI primitives
 │   ├── pages/                        # Page Views
 │   │   ├── Upload.jsx                # Report file upload & OCR parsing
 │   │   ├── Dashboard.jsx             # Health metrics, trend graphs & summaries
 │   │   ├── Assistant.jsx             # RAG-assisted medical AI chat interface
-│   │   └── admin/                    # Admin login & multi-tab management portal
+│   │   ├── Appointments.jsx          # Doctor consultation & specialist booking
+│   │   ├── auth/                     # Sign In, Sign Up, & Password Recovery
+│   │   └── admin/                    # Admin portal, SQL console & DB inspector
 │   ├── features/auth/                # AuthProvider, ProtectedRoute & AdminRoute
-│   ├── lib/                          # API client, OCR, risk prediction, local fallback
+│   ├── lib/                          # Groq service, RAG engine, OCR & API clients
 │   └── tests/                        # Vitest automated test suite
 │
-├── docker-compose.yml                # Multi-container stack definition
+├── docker-compose.yml                # Multi-container orchestration (Postgres, MinIO, Backend, Frontend)
 ├── Dockerfile                        # Frontend Nginx container build script
-└── README.md                         # Developer documentation & onboarding guide
+├── nginx.conf                        # Frontend SPA routing configuration
+├── .env.example                      # Template environment variables for developers
+└── README.md                         # Project documentation & onboarding guide
 ```
 
 ---
 
-## ⚡ Quick Start for Developers
+## ⚕️ Medical Disclaimer
 
-### 1. Local Development (Without Docker)
-
-1. **Install Dependencies:**
-   ```bash
-   npm install
-   ```
-
-2. **Configure Environment Variables:**
-   Create a `.env` file in the root directory (refer to `server/.env.example`):
-   ```env
-   PORT=5000
-   JWT_SECRET=your_jwt_secret_key_here
-   VITE_GROQ_API_KEY=your_groq_api_key_here
-   POSTGRES_HOST=localhost
-   POSTGRES_PORT=5432
-   POSTGRES_USER=postgres
-   POSTGRES_PASSWORD=your_password
-   POSTGRES_DB=lab_assistant
-   ```
-
-3. **Start Development Server (Frontend + Backend):**
-   ```bash
-   npm run dev
-   ```
-   - 🌐 **Frontend App:** `http://localhost:8080` (or Vite assigned port)
-   - ⚙️ **Backend Server:** `http://localhost:5000`
-
----
-
-### 2. Containerized Start (Docker Compose)
-
-Run the full container stack (PostgreSQL, MinIO, Backend Server, Nginx Frontend):
-
-```bash
-docker compose up -d
-```
-
-#### Service Endpoints:
-- 🌐 **Web App:** `http://localhost:8080`
-- ⚙️ **Express API:** `http://localhost:5000/api`
-- 🗄️ **MinIO Storage Console:** `http://localhost:9001` *(User: `minioadmin` / Pass: `minioadminpassword`)*
-- 📊 **PostgreSQL Database:** `localhost:5432` *(Database: `lab_assistant`)*
-
----
-
-## 🧪 Testing & Verification
-
-Run the Vitest test suite to verify security, database models, and AI assistant logic:
-
-```bash
-npm test
-```
-
-Build the production frontend bundle:
-
-```bash
-npm run build
-```
-
----
-
-## 🔑 Default Admin Credentials
-
-- **Email:** `admin@labsense.com`
-- **Password:** `admin123`
-- **Role:** Administrator (Access to Admin Portal at `/admin/dashboard`)
+*LabSense AI is designed for educational, informational, and personal wellness monitoring purposes only. The automated parameter triage, clinical reasoning chains, and AI assistant replies do not constitute medical diagnosis, treatment advice, or formal clinical prescriptions. Always consult a board-certified physician or qualified healthcare provider with any medical questions or diagnostic concerns.*
