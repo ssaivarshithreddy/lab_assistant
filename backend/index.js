@@ -14,7 +14,7 @@ import {
   requireAdmin,
   setTokenCookie,
   clearTokenCookie,
-} from '../middlewares/authenticationMiddleware.js';
+} from './middlewares/authenticationMiddleware.js';
 import cookieParser from 'cookie-parser';
 import { generateMedicalReasoning } from './medicalReasoningService.js';
 import { retrieveServerRagContext } from './ragService.js';

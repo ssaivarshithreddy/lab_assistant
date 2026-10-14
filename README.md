@@ -189,41 +189,44 @@ npm run build
 
 ```text
 lab_assistant/
-├── server/                           # Express Backend Server
-│   ├── index.js                      # Main Express routes & API handlers
+│
+├── frontend/                         # 🎨 React Frontend Application
+│   ├── src/                          # Application source code
+│   │   ├── components/               # AppLayout, MedicalReasoningCard, UI primitives
+│   │   ├── pages/                    # Upload, Dashboard, Assistant, Appointments, Admin
+│   │   ├── features/auth/            # AuthProvider, ProtectedRoute & Role Guards
+│   │   ├── lib/                      # Groq service, client RAG engine, OCR & API clients
+│   │   └── tests/                    # Frontend Vitest test suites
+│   ├── index.html                    # HTML entry point
+│   ├── vite.config.js                # Vite build & proxy configuration
+│   ├── vitest.config.js              # Vitest test runner configuration
+│   ├── tailwind.config.js            # Tailwind CSS styling & theme tokens
+│   ├── components.json               # Shadcn UI configuration
+│   ├── Dockerfile                    # Frontend Nginx production container
+│   ├── nginx.conf                    # Nginx SPA routing configuration
+│   ├── package.json                  # Isolated frontend dependencies
+│   └── .env.example                  # Frontend environment configuration template
+│
+├── backend/                          # ⚙️ Express Node.js Backend API
+│   ├── index.js                      # Express API routes, report processing & middleware
 │   ├── db.js                         # PostgreSQL connection pool & health checks
-│   ├── minioClient.js                # MinIO S3 storage client & local fallback
+│   ├── minioClient.js                # MinIO S3 client with local disk fallback
 │   ├── schema.sql                    # Database migrations, tables & indexes
-│   ├── init-db.js                    # Auto-migration runner on startup
-│   ├── emailService.js               # SMTP / Nodemailer OTP dispatch service
-│   ├── ragService.js                 # Server-side RAG chunk search & indexing
+│   ├── init-db.js                    # Database startup auto-migration runner
+│   ├── emailService.js               # 2FA / OTP email dispatch service
+│   ├── ragService.js                 # Server-side RAG chunk search & GIN indexing
 │   ├── medicalKnowledgeBase.js       # Curated clinical guideline database
 │   ├── medicalReasoningService.js    # 4-step pathophysiological rationale engine
-│   └── Dockerfile                    # Backend container build script
-│
-├── src/                              # React Frontend Application
-│   ├── components/                   # Reusable UI components & layouts
-│   │   ├── AppLayout.jsx             # Responsive glassmorphic layout & navigation
-│   │   ├── MedicalReasoningCard.jsx  # 4-step clinical reasoning card
-│   │   ├── UserProfileDialog.jsx     # Profile settings & 2FA controls
-│   │   ├── MedicalDisclaimer.jsx     # Clinical disclaimers & compliance notices
-│   │   └── ui/                       # Shadcn / Radix Tailwind UI primitives
-│   ├── pages/                        # Page Views
-│   │   ├── Upload.jsx                # Report file upload & OCR parsing
-│   │   ├── Dashboard.jsx             # Health metrics, trend graphs & summaries
-│   │   ├── Assistant.jsx             # RAG-assisted medical AI chat interface
-│   │   ├── Appointments.jsx          # Doctor consultation & specialist booking
-│   │   ├── auth/                     # Sign In, Sign Up, & Password Recovery
-│   │   └── admin/                    # Admin portal, SQL console & DB inspector
-│   ├── features/auth/                # AuthProvider, ProtectedRoute & AdminRoute
-│   ├── lib/                          # Groq service, RAG engine, OCR & API clients
-│   └── tests/                        # Vitest automated test suite
+│   ├── encryptionService.js          # AES-256-GCM data encryption service
+│   ├── middlewares/                  # JWT auth & role validation middlewares
+│   ├── tests/                        # Backend Vitest test suites (security & encryption)
+│   ├── Dockerfile                    # Backend Node.js container build script
+│   ├── package.json                  # Isolated backend dependencies
+│   └── .env.example                  # Backend environment configuration template
 │
 ├── docker-compose.yml                # Multi-container orchestration (Postgres, MinIO, Backend, Frontend)
-├── Dockerfile                        # Frontend Nginx container build script
-├── nginx.conf                        # Frontend SPA routing configuration
-├── .env.example                      # Template environment variables for developers
-└── README.md                         # Project documentation & onboarding guide
+├── package.json                      # Root npm workspace orchestrator (runs both frontend & backend)
+└── README.md                         # Master documentation & developer onboarding guide
 ```
 
 ---

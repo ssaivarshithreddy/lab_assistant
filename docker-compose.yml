@@ -17,7 +17,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Auto-executes SQL schema migration on initial DB creation
-      - ./server/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./backend/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d lab_assistant"]
       interval: 5s
@@ -51,8 +51,8 @@ services:
   # ==========================================
   backend:
     build:
-      context: .
-      dockerfile: server/Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: labsense-backend
     restart: always
     ports:
@@ -89,7 +89,7 @@ services:
   # ==========================================
   frontend:
     build:
-      context: .
+      context: ./frontend
       dockerfile: Dockerfile
     container_name: labsense-frontend
     restart: always
