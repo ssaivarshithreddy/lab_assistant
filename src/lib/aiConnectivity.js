@@ -118,7 +118,7 @@ export async function runAiConnectivityTest() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "qwen/qwen3.6-27b",
+          model: "openai/gpt-oss-20b",
           messages: [{ role: "user", content: "Reply with: OK" }],
           max_tokens: 10,
           stream: false,
@@ -129,7 +129,7 @@ export async function runAiConnectivityTest() {
       if (!resp.ok) {
         const text = await resp.text();
         checks.push({
-          name: "Groq API (qwen3.6-27b / gpt-oss)",
+          name: "Groq API (gpt-oss-20b / qwen3.8-27b)",
           ok: false,
           details: `HTTP ${resp.status}: ${text.slice(0, 250)}`,
         });
@@ -137,7 +137,7 @@ export async function runAiConnectivityTest() {
         const data = await resp.json().catch(() => ({}));
         const hasContent = Boolean(data.choices?.[0]?.message?.content);
         checks.push({
-          name: "Groq API (qwen3.6-27b / gpt-oss)",
+          name: "Groq API (gpt-oss-20b / qwen3.8-27b)",
           ok: hasContent,
           details: hasContent ? "✓ Groq API is fully operational" : "Groq responded but no message content",
         });

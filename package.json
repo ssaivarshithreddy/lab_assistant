@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "concurrently \"node server/index.js\" \"vite\"",
     "server": "node server/index.js",
+    "docker:up": "docker compose up -d postgres minio",
+    "docker:down": "docker compose down",
+    "docker:all": "docker compose up -d --build",
     "minio": "powershell ./start-minio.ps1",
     "client": "vite",
     "build": "vite build",

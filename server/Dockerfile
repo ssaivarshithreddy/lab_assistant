@@ -3,15 +3,19 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package manifests and install dependencies
+# Copy root package.json and package-lock.json
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm install --omit=dev
 
-# Copy application code
-COPY . .
+# Copy server code and middlewares
+COPY server ./server
+COPY middlewares ./middlewares
+
+# Set working directory to server
+WORKDIR /app/server
 
 # Expose API port
 EXPOSE 5000
 
-# Start server
+# Start Express server
 CMD ["node", "index.js"]

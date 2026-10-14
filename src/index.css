@@ -46,6 +46,15 @@
 
     --radius: 1rem;
 
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 243 75% 58%;
+
     --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
     --gradient-soft: linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%);
     --shadow-card: 0 4px 20px -2px rgba(0, 0, 0, 0.06);
@@ -91,6 +100,15 @@
     --input: 217 33% 15%;
     --ring: 243 75% 62%;
 
+    --sidebar-background: 222 47% 7%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 243 75% 62%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 217 33% 15%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 217 33% 15%;
+    --sidebar-ring: 243 75% 62%;
+
     --shadow-card: 0 8px 32px 0 rgba(0, 0, 0, 0.36);
     --shadow-elevated: 0 20px 40px -15px rgba(99, 102, 241, 0.35);
   }
@@ -103,10 +121,6 @@
   body {
     @apply bg-background text-foreground antialiased selection:bg-indigo-500/30 selection:text-indigo-200 transition-colors duration-300;
     font-family: 'Urbanist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  }
-
-  /* Light Theme Ambient Lights */
-  body:not(.dark) {
     background-color: #f8fafc;
     background-image: 
       radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
@@ -116,10 +130,10 @@
   }
 
   /* Dark Theme Ambient Lights */
-  .dark body, body.dark {
-    background-color: #090d16;
+  .dark body, html.dark body {
+    background-color: #070b14;
     background-image: 
-      radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.14) 0px, transparent 50%),
+      radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
       radial-gradient(at 100% 0%, rgba(139, 92, 246, 0.12) 0px, transparent 50%),
       radial-gradient(at 50% 100%, rgba(16, 185, 129, 0.08) 0px, transparent 50%);
     background-attachment: fixed;
@@ -143,28 +157,24 @@
   /* Glass & Card Utilities */
   .glass-panel {
     @apply backdrop-blur-xl transition-all duration-300;
-  }
-  .dark .glass-panel {
-    background: rgba(15, 23, 42, 0.75);
-    border-color: rgba(255, 255, 255, 0.08);
-  }
-  body:not(.dark) .glass-panel {
     background: rgba(255, 255, 255, 0.85);
     border-color: rgba(226, 232, 240, 0.9);
+  }
+  .dark .glass-panel, html.dark .glass-panel {
+    background: rgba(15, 23, 42, 0.85);
+    border-color: rgba(255, 255, 255, 0.1);
   }
 
   .glass-card {
     @apply backdrop-blur-md transition-all duration-300 rounded-3xl;
-  }
-  .dark .glass-card {
-    background: linear-gradient(135deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0.75) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-  }
-  body:not(.dark) .glass-card {
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.9) 100%);
     border: 1px solid rgba(226, 232, 240, 0.9);
     box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.05);
+  }
+  .dark .glass-card, html.dark .glass-card {
+    background: linear-gradient(135deg, rgba(20, 29, 47, 0.8) 0%, rgba(11, 17, 32, 0.92) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45);
   }
 
   .glow-indigo {

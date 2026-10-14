@@ -12,7 +12,10 @@ import {
   authenticateJWT,
   generateToken,
   requireAdmin,
+  setTokenCookie,
+  clearTokenCookie,
 } from '../middlewares/authenticationMiddleware.js';
+import cookieParser from 'cookie-parser';
 import { generateMedicalReasoning } from './medicalReasoningService.js';
 import { retrieveServerRagContext } from './ragService.js';
 import { encryptData, decryptData } from './encryptionService.js';
@@ -39,6 +42,7 @@ const PORT = process.env.PORT || 5000;
 /*                           MIDDLEWARE SETUP                                 */
 /* -------------------------------------------------------------------------- */
 app.use(cors());
+app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -248,6 +252,7 @@ app.post('/api/auth/signup', async (req, res) => {
     );
 
     const token = generateToken(user);
+    setTokenCookie(res, token);
     res.json({ token, user, message: 'Account created and identity verified successfully!' });
   } catch (err) {
     console.error('Signup Error:', err.message);
@@ -279,6 +284,7 @@ app.post('/api/auth/signin', async (req, res) => {
         full_name: 'Administrator',
       };
       const token = generateToken(user);
+      setTokenCookie(res, token);
       return res.json({ token, user });
     }
 
@@ -317,6 +323,7 @@ app.post('/api/auth/signin', async (req, res) => {
     }
 
     const token = generateToken(user);
+    setTokenCookie(res, token);
     res.json({ token, user });
   } catch (err) {
     console.error('Signin Error:', err.message);
@@ -352,11 +359,18 @@ app.post('/api/auth/verify-2fa', async (req, res) => {
     const user = userRes.rows[0];
 
     const token = generateToken(user);
+    setTokenCookie(res, token);
     res.json({ success: true, token, user });
   } catch (err) {
     console.error('2FA Verification Error:', err.message);
     res.status(500).json({ error: 'Failed to verify 2FA code' });
   }
+});
+
+// Sign Out (Clears HTTP-only cookie)
+app.post('/api/auth/signout', (req, res) => {
+  clearTokenCookie(res);
+  res.json({ success: true, message: 'Logged out successfully' });
 });
 
 // Toggle 2FA in user profile settings
@@ -704,6 +718,11 @@ app.get('/api/reports/:id/reasoning', authenticateJWT, async (req, res) => {
     }
     const r = reportRes.rows[0];
     let reasoning = r.medical_reasoning;
+    if (typeof reasoning === 'string') {
+      try { reasoning = JSON.parse(reasoning); } catch (e) { reasoning = null; }
+    }
+
+    // Always generate fresh reasoning if missing or incomplete
     if (!reasoning || !reasoning.step1 || !reasoning.step1.observations) {
       reasoning = generateMedicalReasoning(r.values, r.summary);
       await query('UPDATE reports SET medical_reasoning = $1 WHERE id = $2', [
@@ -736,7 +755,10 @@ app.post('/api/rag/search', authenticateJWT, async (req, res) => {
       activeValues: active_values,
     });
 
-    res.json(ragResult);
+    res.json({
+      chunks: ragResult.chunks || [],
+      ...ragResult,
+    });
   } catch (err) {
     console.error('RAG Search Error:', err.message);
     res.status(500).json({ error: 'Failed to process server RAG search' });
@@ -901,6 +923,137 @@ app.post('/api/chat', authenticateJWT, async (req, res) => {
   }
 });
 
+// AI Chat Generation Endpoint
+app.post('/api/chat/ask', authenticateJWT, async (req, res) => {
+  try {
+    const { message, report_id, active_values } = req.body;
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Message content is required' });
+    }
+
+    const groqKey = process.env.VITE_GROQ_API_KEY || process.env.GROQ_API_KEY;
+    let values = active_values || {};
+    let summary = '';
+
+    if (report_id) {
+      const repRes = await query('SELECT values, summary FROM reports WHERE id = $1 AND user_id = $2', [
+        report_id,
+        req.user.id,
+      ]);
+      if (repRes.rows.length > 0) {
+        if (!active_values && repRes.rows[0].values) {
+          try {
+            values = typeof repRes.rows[0].values === 'string' ? JSON.parse(repRes.rows[0].values) : repRes.rows[0].values;
+          } catch (e) {}
+        }
+        summary = repRes.rows[0].summary || '';
+      }
+    }
+
+    // Retrieve RAG context
+    const ragContext = await retrieveServerRagContext({
+      queryText: message,
+      userId: req.user.id,
+      reportId: report_id,
+      activeValues: values,
+      topK: 5,
+    });
+
+    let assistantReply = '';
+    const GROQ_ACTIVE_MODELS = ['openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b'];
+
+    if (groqKey) {
+      const metricsText = Object.entries(values || {})
+        .filter(([, v]) => v?.value != null)
+        .map(([k, v]) => `- ${k.toUpperCase()}: ${v.value} ${v.unit || ''} (${v.status || 'normal'})`)
+        .join('\n');
+
+      const systemPrompt = `You are a helpful, empathetic, and direct AI Health Assistant.
+Answer the CURRENT USER QUESTION directly in simple, patient-friendly terms.
+Address whatever specific topic or biomarker the user is asking about.
+
+REPORT CONTEXT:
+Summary: ${summary || 'None'}
+Metrics:
+${metricsText || 'None'}
+
+${ragContext.ragPromptText || ''}
+
+FORMAT:
+📌 **Direct Answer:** Direct 1-2 sentence response to the specific question asked.
+💡 **What This Means:** Clear explanations.
+🩺 **Questions for Your Doctor:** 1-2 specific questions.
+Disclaimer: For educational reference only. Consult your physician.`;
+
+      for (const model of GROQ_ACTIVE_MODELS) {
+        try {
+          const groqResp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${groqKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: `[CURRENT USER QUESTION]: "${message}"` },
+              ],
+              temperature: 0.7,
+              max_tokens: 1024,
+            }),
+          });
+
+          if (groqResp.ok) {
+            const data = await groqResp.json();
+            const text = data.choices?.[0]?.message?.content || '';
+            if (text) {
+              assistantReply = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+              break;
+            }
+          }
+        } catch (gErr) {
+          console.warn(`Groq server model ${model} error:`, gErr.message);
+        }
+      }
+    }
+
+    if (!assistantReply) {
+      assistantReply = `📌 **Direct Answer:**
+Regarding your question "${message}": please discuss your lab markers with your clinician.
+
+💡 **Summary of Findings:**
+${summary || 'All evaluated markers are under clinical review.'}
+
+🩺 **Questions for Your Doctor:**
+1. What underlying factors are contributing to my readings?
+2. Are follow-up panels recommended?
+
+*Disclaimer: This is for educational reference only. Please consult your physician for clinical diagnosis.*`;
+    }
+
+    // Save user and assistant messages
+    await query(
+      'INSERT INTO chat_messages (user_id, report_id, role, content) VALUES ($1, $2, $3, $4)',
+      [req.user.id, report_id || null, 'user', message]
+    );
+    const aMsg = await query(
+      'INSERT INTO chat_messages (user_id, report_id, role, content) VALUES ($1, $2, $3, $4) RETURNING *',
+      [req.user.id, report_id || null, 'assistant', assistantReply]
+    );
+
+    res.json({
+      reply: assistantReply,
+      message_id: aMsg.rows[0]?.id,
+      citations: ragContext.citations || [],
+      medicalGuidelines: ragContext.medicalGuidelines || [],
+    });
+  } catch (err) {
+    console.error('Chat Completion Error:', err.message);
+    res.status(500).json({ error: 'Failed to generate chat response' });
+  }
+});
+
 // Delete Chat Messages / Session Thread
 app.delete('/api/chat', authenticateJWT, async (req, res) => {
   try {
@@ -977,6 +1130,7 @@ app.post('/api/admin/login', async (req, res) => {
       role: 'admin',
       full_name: 'Administrator',
     });
+    setTokenCookie(res, token);
     return res.json({ token, user: { email: adminEmail, role: 'admin' } });
   }
 
@@ -989,6 +1143,7 @@ app.post('/api/admin/login', async (req, res) => {
       const match = await bcrypt.compare(password, userRes.rows[0].password_hash);
       if (match) {
         const token = generateToken(userRes.rows[0]);
+        setTokenCookie(res, token);
         return res.json({ token, user: userRes.rows[0] });
       }
     }
@@ -1308,39 +1463,6 @@ app.get('/api/admin/db/stats', authenticateJWT, requireAdmin, async (req, res) =
   }
 });
 
-// ==========================================
-// 5. DATABASE INSPECTOR & MINIO STORAGE CONTROL ROUTES
-// ==========================================
-
-// Get All Database Tables & Schema Overview
-app.get('/api/admin/db/tables', authenticateJWT, requireAdmin, async (req, res) => {
-  try {
-    const tableNames = ['users', 'profiles', 'reports', 'report_chunks', 'chat_messages'];
-    const tables = [];
-
-    for (const t of tableNames) {
-      const countRes = await query(`SELECT COUNT(*) FROM ${t}`);
-      const colsRes = await query(
-        `SELECT column_name, data_type, is_nullable
-         FROM information_schema.columns
-         WHERE table_name = $1
-         ORDER BY ordinal_position`,
-        [t]
-      );
-      tables.push({
-        table_name: t,
-        row_count: parseInt(countRes.rows[0].count, 10),
-        columns: colsRes.rows,
-      });
-    }
-
-    res.json(tables);
-  } catch (err) {
-    console.error('Admin DB Tables Error:', err.message);
-    res.status(500).json({ error: 'Failed to fetch database tables overview' });
-  }
-});
-
 // Get Paginated Rows for a Specific Table
 app.get('/api/admin/db/table/:tableName', authenticateJWT, requireAdmin, async (req, res) => {
   try {
@@ -1366,37 +1488,6 @@ app.get('/api/admin/db/table/:tableName', authenticateJWT, requireAdmin, async (
   } catch (err) {
     console.error('Admin DB Table Rows Error:', err.message);
     res.status(500).json({ error: `Failed to fetch rows for table ${req.params.tableName}` });
-  }
-});
-
-// Admin Raw SQL Console Executer
-app.post('/api/admin/db/query', authenticateJWT, requireAdmin, async (req, res) => {
-  try {
-    const { sql } = req.body;
-    if (!sql || !sql.trim()) {
-      return res.status(400).json({ error: 'SQL query string is required' });
-    }
-
-    const trimmed = sql.trim();
-    const isDangerous = /\b(DROP DATABASE|TRUNCATE TABLE users)\b/i.test(trimmed);
-    if (isDangerous) {
-      return res.status(403).json({ error: 'Destructive system queries are restricted' });
-    }
-
-    const startTime = Date.now();
-    const queryRes = await query(trimmed);
-    const durationMs = Date.now() - startTime;
-
-    res.json({
-      command: queryRes.command,
-      rowCount: queryRes.rowCount,
-      durationMs,
-      columns: queryRes.fields ? queryRes.fields.map((f) => f.name) : [],
-      rows: queryRes.rows || [],
-    });
-  } catch (err) {
-    console.error('Admin SQL Query Error:', err.message);
-    res.status(400).json({ error: err.message });
   }
 });
 

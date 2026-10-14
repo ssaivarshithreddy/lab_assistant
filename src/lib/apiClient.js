@@ -38,6 +38,7 @@ export async function apiFetch(endpoint, options = {}) {
     : `${cleanBase}/${cleanEndpoint}`;
 
   const response = await fetch(url, {
+    credentials: 'same-origin',
     ...options,
     headers,
   });
@@ -72,6 +73,7 @@ export const apiClient = {
   // Auth & Verification
   signUp: (data) => apiFetch('/auth/signup', { method: 'POST', body: JSON.stringify(data) }),
   signIn: (data) => apiFetch('/auth/signin', { method: 'POST', body: JSON.stringify(data) }),
+  signOut: () => apiFetch('/auth/signout', { method: 'POST' }),
   verify2Fa: (data) => apiFetch('/auth/verify-2fa', { method: 'POST', body: JSON.stringify(data) }),
   toggle2Fa: (enabled) => apiFetch('/auth/2fa/toggle', { method: 'POST', body: JSON.stringify({ enabled }) }),
   sendEmailOtp: (email) => apiFetch('/auth/send-email-otp', { method: 'POST', body: JSON.stringify({ email }) }),
@@ -105,6 +107,7 @@ export const apiClient = {
     return apiFetch(`/chat${q}`);
   },
   sendChatMessage: (data) => apiFetch('/chat', { method: 'POST', body: JSON.stringify(data) }),
+  askChat: (data) => apiFetch('/chat/ask', { method: 'POST', body: JSON.stringify(data) }),
   deleteChatMessages: (reportId) => {
     const q = reportId && reportId !== 'null' ? `?report_id=${encodeURIComponent(reportId)}` : '';
     return apiFetch(`/chat${q}`, { method: 'DELETE' });

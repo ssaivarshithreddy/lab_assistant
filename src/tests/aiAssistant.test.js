@@ -107,4 +107,39 @@ Explain HbA1c.
     expect(isMedicalQuery('Why is my fasting blood glucose high?')).toBe(true);
   });
 
+  // TEST 14: HbA1c High Value Mechanism & No False Homeostatic Balance
+  it('TEST 14: Accurately identifies HIGH HbA1c and assigns Glycemic pattern without false homeostatic balance', () => {
+    const reasoning = generateMedicalReasoning({ hba1c: { value: 7.2, unit: '%', status: 'high' } });
+    expect(reasoning.step1.status).toBe('attention');
+    expect(reasoning.step1.abnormalCount).toBe(1);
+    expect(reasoning.step2.patterns.some((p) => p.pattern.includes('Glycemic'))).toBe(true);
+    expect(reasoning.step2.patterns.some((p) => p.pattern.includes('Homeostatic Balance'))).toBe(false);
+    expect(reasoning.step4.questions.some((q) => q.toLowerCase().includes('hba1c'))).toBe(true);
+  });
+
+  // TEST 15: Platelets Thrombocytopenia Pattern
+  it('TEST 15: Identifies low platelets with Thrombocytopenia pattern', () => {
+    const reasoning = generateMedicalReasoning({ platelets: { value: 95, unit: '10^9/L', status: 'low' } });
+    expect(reasoning.step1.status).toBe('attention');
+    expect(reasoning.step2.patterns.some((p) => p.pattern.includes('Thrombocytopenia'))).toBe(true);
+  });
+
+  // TEST 16: Biomarker Key Normalization and Alias Resolution
+  it('TEST 16: Normalizes biomarker aliases such as HGB and PLT', () => {
+    const reasoning = generateMedicalReasoning({
+      HGB: { value: 9.2, unit: 'g/dL', status: 'low' },
+      plt: { value: 110, unit: '10^9/L', status: 'low' },
+    });
+    expect(reasoning.step1.abnormalCount).toBe(2);
+    expect(reasoning.step2.patterns.some((p) => p.pattern.includes('Hematologic'))).toBe(true);
+    expect(reasoning.step2.patterns.some((p) => p.pattern.includes('Thrombocytopenia'))).toBe(true);
+  });
+
+  // TEST 17: Cleans various reasoning artifacts (<thought>, etc.)
+  it('TEST 17: Cleans <thought> tags and reasoning prefixes', () => {
+    const raw = `<thought>Internal model thinking</thought>Thought:\n\nDirect answer here.`;
+    const cleaned = cleanModelResponse(raw);
+    expect(cleaned).toBe('Direct answer here.');
+  });
+
 });

@@ -26,15 +26,16 @@ export function generateToken(userPayload) {
  * Express middleware to authenticate incoming requests via Bearer JWT.
  */
 export function authenticateJWT(req, res, next) {
+  let token = null;
   const authHeader = req.headers.authorization;
 
-  if (!authHeader) {
-    return res.status(401).json({ error: 'Authorization header missing' });
+  if (authHeader) {
+    token = authHeader.startsWith('Bearer ')
+      ? authHeader.substring(7)
+      : authHeader;
+  } else if (req.cookies && req.cookies.labsense_jwt_token) {
+    token = req.cookies.labsense_jwt_token;
   }
-
-  const token = authHeader.startsWith('Bearer ')
-    ? authHeader.substring(7)
-    : authHeader;
 
   if (!token) {
     return res.status(401).json({ error: 'Authentication token missing' });
@@ -50,18 +51,44 @@ export function authenticateJWT(req, res, next) {
   }
 }
 
+export const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax',
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+};
+
+export function setTokenCookie(res, token) {
+  res.cookie('labsense_jwt_token', token, COOKIE_OPTIONS);
+}
+
+export function clearTokenCookie(res) {
+  res.clearCookie('labsense_jwt_token', {
+    ...COOKIE_OPTIONS,
+    maxAge: undefined,
+  });
+}
+
 /**
  * Optional middleware for routes that allow both guest and authenticated users.
  */
 export function optionalJWT(req, res, next) {
+  let token = null;
   const authHeader = req.headers.authorization;
-  if (!authHeader) {
+
+  if (authHeader) {
+    token = authHeader.startsWith('Bearer ')
+      ? authHeader.substring(7)
+      : authHeader;
+  } else if (req.cookies && req.cookies.labsense_jwt_token) {
+    token = req.cookies.labsense_jwt_token;
+  }
+
+  if (!token) {
     req.user = null;
     return next();
   }
-  const token = authHeader.startsWith('Bearer ')
-    ? authHeader.substring(7)
-    : authHeader;
+
   try {
     req.user = jwt.verify(token, JWT_SECRET);
   } catch (err) {

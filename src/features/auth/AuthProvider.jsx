@@ -9,26 +9,17 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   const checkUserSession = async () => {
-    const token = getToken();
-    if (!token) {
-      setUser(null);
-      setSession(null);
-      setLoading(false);
-      return;
-    }
-
     try {
       const data = await apiClient.getMe();
       if (data?.user) {
         setUser(data.user);
-        setSession({ access_token: token, user: data.user });
+        setSession({ access_token: getToken() || "cookie", user: data.user });
       } else {
         removeToken();
         setUser(null);
         setSession(null);
       }
     } catch (err) {
-      console.warn("Auth Session check failed:", err.message);
       removeToken();
       setUser(null);
       setSession(null);
@@ -61,7 +52,10 @@ export function AuthProvider({ children }) {
     setSession((prev) => ({ ...prev, user: userData, access_token: token || prev?.access_token }));
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await apiClient.signOut();
+    } catch (e) {}
     removeToken();
     setUser(null);
     setSession(null);
