@@ -15,8 +15,8 @@
     "test": "npm run --prefix frontend test && npm run --prefix backend test",
     "test:frontend": "npm run --prefix frontend test",
     "test:backend": "npm run --prefix backend test",
-    "lint": "npm run --prefix frontend lint",
-    "docker:up": "docker compose up -d postgres minio",
+    "docker:up": "docker compose up -d postgres",
+    "docker:storage": "docker compose up -d minio",
     "docker:down": "docker compose down",
     "docker:all": "docker compose up -d --build",
     "minio": "powershell ./start-minio.ps1"
