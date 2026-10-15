@@ -79,8 +79,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
-        condition: service_healthy
 
   # ==========================================
   # 4. VITE REACT FRONTEND SERVICE (NGINX SPA)
