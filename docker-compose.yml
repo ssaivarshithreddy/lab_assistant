@@ -23,10 +23,10 @@ services:
       retries: 5
 
   # ==========================================
-  # 2. MINIO OBJECT STORAGE SERVICE
+  # 2. MINIO OBJECT STORAGE SERVICE (S3 Compatible)
   # ==========================================
   minio:
-    image: quay.io/minio/minio:latest
+    image: pgsty/silo:latest
     container_name: labsense-minio
     restart: always
     command: server /data --console-address ":9001"
@@ -39,7 +39,7 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD-SHELL", "mcli ready local || exit 0"]
       interval: 5s
       timeout: 5s
       retries: 5
