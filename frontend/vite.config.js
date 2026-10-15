@@ -4,9 +4,10 @@ import path from "path";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
+  envDir: path.resolve(__dirname, ".."),
   server: {
     host: "::",
-    port: 8080,
+    port: 3000,
     allowedHosts: true,
     hmr: {
       overlay: false,
@@ -21,7 +22,7 @@ export default defineConfig(({ mode }) => ({
   },
   preview: {
     host: "::",
-    port: 8080,
+    port: 3000,
     allowedHosts: true,
   },
   plugins: [react()].filter(Boolean),
