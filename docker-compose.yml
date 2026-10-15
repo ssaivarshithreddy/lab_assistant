@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ==========================================
   # 1. POSTGRESQL DATABASE SERVICE
@@ -28,7 +26,7 @@ services:
   # 2. MINIO OBJECT STORAGE SERVICE
   # ==========================================
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     container_name: labsense-minio
     restart: always
     command: server /data --console-address ":9001"
