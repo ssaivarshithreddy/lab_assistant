@@ -47,7 +47,11 @@ export async function apiFetch(endpoint, options = {}) {
     let errorMessage = `HTTP Error ${response.status}`;
     try {
       const errorData = await response.json();
+      if (errorData?.requires_verification) {
+        return errorData;
+      }
       if (errorData?.error) errorMessage = errorData.error;
+      else if (errorData?.message) errorMessage = errorData.message;
     } catch (e) {}
 
     if (response.status === 401) {

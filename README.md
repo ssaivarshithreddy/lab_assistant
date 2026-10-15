@@ -129,7 +129,7 @@ Run the concurrent development server:
 npm run dev
 ```
 This single command automatically starts:
-- 🌐 **React Frontend (Vite):** [http://localhost:8080](http://localhost:8080)
+- 🌐 **React Frontend (Vite):** [http://localhost:3000](http://localhost:3000)
 - ⚙️ **Express Backend API:** [http://localhost:5000](http://localhost:5000)
 
 ---
@@ -154,7 +154,7 @@ npm run docker:down
 ## 🔑 Default Credentials
 
 ### Administrator Portal
-- **URL:** [http://localhost:8080/admin/login](http://localhost:8080/admin/login) (or via the Admin Portal link in navigation)
+- **URL:** [http://localhost:3000/admin/login](http://localhost:3000/admin/login) (or via the Admin Portal link in navigation)
 - **Email:** `admin@labsense.com`
 - **Password:** `admin123`
 - **Permissions:** Full access to DB Inspector, SQL Query Console, MinIO File Explorer, and User Management.

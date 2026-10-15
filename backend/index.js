@@ -194,7 +194,7 @@ app.post('/api/auth/signup', async (req, res) => {
 
       await sendOtpEmail(cleanEmail, otpCode, 'Registration');
 
-      return res.status(422).json({
+      return res.status(200).json({
         requires_verification: true,
         message: `Please enter the 6-digit OTP code sent to ${cleanEmail} to verify your identity and complete registration.`,
         email: cleanEmail,
