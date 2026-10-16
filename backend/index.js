@@ -1,6 +1,6 @@
+import './env.js';
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import fs from 'fs';
@@ -32,8 +32,6 @@ import { sendOtpEmail } from './emailService.js';
  *  - Admin Operations: Database inspector, interactive SQL console, storage explorer.
  * ============================================================================
  */
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -192,13 +190,18 @@ app.post('/api/auth/signup', async (req, res) => {
         expiresAt,
       ]);
 
-      await sendOtpEmail(cleanEmail, otpCode, 'Registration');
+      const emailResult = await sendOtpEmail(cleanEmail, otpCode, 'Registration');
+      if (process.env.NODE_ENV === 'production' && !emailResult?.delivered) {
+        return res.status(503).json({
+          error: 'Unable to deliver verification email. Please check your email address or try again later.',
+        });
+      }
 
       return res.status(200).json({
         requires_verification: true,
         message: `Please enter the 6-digit OTP code sent to ${cleanEmail} to verify your identity and complete registration.`,
         email: cleanEmail,
-        code_dev: otpCode,
+        ...(process.env.NODE_ENV !== 'production' ? { code_dev: otpCode } : {}),
       });
     }
 
@@ -312,13 +315,19 @@ app.post('/api/auth/signin', async (req, res) => {
         [user.id, otpCode, expiresAt]
       );
 
-      await sendOtpEmail(user.email, otpCode, 'Two-Factor Authentication');
+      const emailResult = await sendOtpEmail(user.email, otpCode, 'Two-Factor Authentication');
+      if (process.env.NODE_ENV === 'production' && !emailResult?.delivered) {
+        return res.status(503).json({
+          error: 'Unable to deliver Two-Factor Authentication email. Please try again later.',
+        });
+      }
 
       return res.json({
         requires_2fa: true,
         message: 'Two-Factor Authentication OTP code sent to your email/device',
         user_id: user.id,
         email: user.email,
+        ...(process.env.NODE_ENV !== 'production' ? { code_dev: otpCode } : {}),
       });
     }
 
@@ -422,8 +431,18 @@ app.post('/api/auth/send-email-otp', async (req, res) => {
       expiresAt,
     ]);
 
-    await sendOtpEmail(targetEmail, otpCode, 'Email Verification');
-    res.json({ success: true, message: `Email verification code sent to ${targetEmail}`, code_dev: otpCode });
+    const emailResult = await sendOtpEmail(targetEmail, otpCode, 'Email Verification');
+    if (process.env.NODE_ENV === 'production' && !emailResult?.delivered) {
+      return res.status(503).json({
+        error: 'Unable to deliver verification email. Please try again later.',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Email verification code sent to ${targetEmail}`,
+      ...(process.env.NODE_ENV !== 'production' ? { code_dev: otpCode } : {}),
+    });
   } catch (err) {
     console.error('Send Email OTP Error:', err.message);
     res.status(500).json({ error: 'Failed to send email verification code' });
@@ -498,8 +517,14 @@ app.post('/api/auth/send-phone-otp', async (req, res) => {
       expiresAt,
     ]);
 
-    console.log(`[PHONE SMS VERIFICATION OTP] Sent Code for ${targetPhone}: ${otpCode}`);
-    res.json({ success: true, message: `Phone SMS OTP code sent to ${targetPhone}`, code_dev: otpCode });
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[PHONE SMS VERIFICATION OTP] Sent Code for ${targetPhone}: ${otpCode}`);
+    }
+    res.json({
+      success: true,
+      message: `Phone SMS OTP code sent to ${targetPhone}`,
+      ...(process.env.NODE_ENV !== 'production' ? { code_dev: otpCode } : {}),
+    });
   } catch (err) {
     console.error('Send Phone OTP Error:', err.message);
     res.status(500).json({ error: 'Failed to send phone verification SMS' });

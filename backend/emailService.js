@@ -1,13 +1,5 @@
 import nodemailer from 'nodemailer';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
-dotenv.config();
+import './env.js';
 
 /**
  * Creates nodemailer transporter if SMTP credentials exist in process.env.
@@ -23,6 +15,9 @@ function createTransporter() {
       host,
       port,
       secure: port === 465,
+      connectionTimeout: 4000,
+      greetingTimeout: 4000,
+      socketTimeout: 5000,
       auth: {
         user,
         pass,
@@ -33,6 +28,9 @@ function createTransporter() {
   if (process.env.SMTP_SERVICE && user && pass) {
     return nodemailer.createTransport({
       service: process.env.SMTP_SERVICE,
+      connectionTimeout: 4000,
+      greetingTimeout: 4000,
+      socketTimeout: 5000,
       auth: { user, pass },
     });
   }
@@ -41,13 +39,46 @@ function createTransporter() {
 }
 
 /**
+ * HTTPS-based email delivery via Resend API (Bypasses ISP port blocks)
+ */
+async function sendViaResend(toEmail, subject, htmlContent) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const from = process.env.SMTP_FROM || 'LabSense AI <onboarding@resend.dev>';
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from,
+        to: [toEmail],
+        subject,
+        html: htmlContent,
+      }),
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      console.log(`[EMAIL DISPATCH] Real OTP email sent via Resend HTTPS to ${toEmail} (Id: ${data.id})`);
+      return { success: true, delivered: true, messageId: data.id };
+    }
+    console.warn(`[RESEND API WARN] Resend responded with status ${res.status}:`, data);
+  } catch (err) {
+    console.warn(`[RESEND API ERROR]:`, err.message);
+  }
+  return null;
+}
+
+/**
  * Sends a 6-digit OTP email to recipient.
- * Falls back to console log if SMTP is not configured.
+ * Production mode strictly delivers email; Development mode allows terminal fallback.
  */
 export async function sendOtpEmail(toEmail, otpCode, context = 'Verification') {
-  const transporter = createTransporter();
   const from = process.env.SMTP_FROM || '"LabSense Medical AI" <no-reply@labsense.com>';
-
   const subject = `Your ${context} Verification Code: ${otpCode}`;
   const htmlContent = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
@@ -63,6 +94,14 @@ export async function sendOtpEmail(toEmail, otpCode, context = 'Verification') {
     </div>
   `;
 
+  // 1. Try Resend HTTP API first if configured (never blocked by ISP)
+  if (process.env.RESEND_API_KEY) {
+    const resendResult = await sendViaResend(toEmail, subject, htmlContent);
+    if (resendResult?.success) return resendResult;
+  }
+
+  // 2. Try SMTP Transporter
+  const transporter = createTransporter();
   if (transporter) {
     try {
       const info = await transporter.sendMail({
@@ -74,18 +113,29 @@ export async function sendOtpEmail(toEmail, otpCode, context = 'Verification') {
       console.log(`[EMAIL DISPATCH] Real OTP email sent successfully to ${toEmail} (MessageId: ${info.messageId})`);
       return { success: true, delivered: true, messageId: info.messageId };
     } catch (err) {
-      console.error(`[EMAIL ERROR] Failed to send email via SMTP to ${toEmail}:`, err.message);
-      console.log(`[TERMINAL FALLBACK OTP] Code for ${toEmail}: ${otpCode}`);
+      if (process.env.NODE_ENV === 'production') {
+        console.error(`[EMAIL ERROR] Failed to deliver OTP to ${toEmail} in production: ${err.message}`);
+        return { success: false, delivered: false, error: err.message };
+      }
+      console.error(`\n[DEV NOTICE] Outbound SMTP port is blocked by local network/ISP (${err.code || err.message}).`);
+      console.log(`===================================================================`);
+      console.log(`[LOCAL DEV OTP CODE] Recipient: ${toEmail}`);
+      console.log(`Verification Code: ${otpCode}`);
+      console.log(`Context: ${context}`);
+      console.log(`(This fallback OTP is strictly enabled in development mode)`);
+      console.log(`===================================================================\n`);
       return { success: false, delivered: false, error: err.message, otpCode };
     }
   } else {
-    console.log(`\n========================================================`);
-    console.log(`[DEV MODE - SMTP NOT CONFIGURED]`);
-    console.log(`Target Recipient: ${toEmail}`);
-    console.log(`Verification Context: ${context}`);
-    console.log(`Generated OTP Code: ${otpCode}`);
-    console.log(`Notice: Configure SMTP_HOST, SMTP_USER, & SMTP_PASS in .env to send real emails to inbox.`);
-    console.log(`========================================================\n`);
+    if (process.env.NODE_ENV === 'production') {
+      console.error(`[CRITICAL] Email transport is not configured in production environment.`);
+      return { success: false, delivered: false, error: 'Email transport unconfigured' };
+    }
+    console.log(`\n===================================================================`);
+    console.log(`[LOCAL DEV MODE - SMTP NOT CONFIGURED]`);
+    console.log(`Verification Code: ${otpCode}`);
+    console.log(`Recipient: ${toEmail} (${context})`);
+    console.log(`===================================================================\n`);
     return { success: true, delivered: false, devMode: true, otpCode };
   }
 }

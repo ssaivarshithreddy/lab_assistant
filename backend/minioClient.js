@@ -1,14 +1,7 @@
 import * as Minio from 'minio';
 import fs from 'fs';
 import path from 'path';
-import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
-dotenv.config();
+import './env.js';
 
 const endPoint = process.env.MINIO_ENDPOINT || 'localhost';
 const port = parseInt(process.env.MINIO_PORT || '9000', 10);
