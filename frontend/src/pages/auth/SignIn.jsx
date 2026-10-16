@@ -51,7 +51,12 @@ export default function SignIn() {
             if (data?.requires_2fa) {
                 setRequires2FA(true);
                 setTwoFactorUserId(data.user_id);
-                toast.info("2FA Code Generated! Please enter the 6-digit security code.");
+                if (data.code_dev) {
+                    setTwoFactorCode(data.code_dev);
+                    toast.success(`2FA Code: ${data.code_dev} (Auto-filled)`);
+                } else {
+                    toast.info("2FA Code Generated! Please enter the 6-digit security code.");
+                }
                 return;
             }
 

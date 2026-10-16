@@ -56,7 +56,12 @@ export default function SignUp() {
 
             if (res?.requires_verification) {
                 setRequiresOtp(true);
-                toast.info(res.message || "OTP Sent! Please enter the 6-digit verification code.");
+                if (res.code_dev) {
+                    setOtpCode(res.code_dev);
+                    toast.success(`Verification Code: ${res.code_dev} (Auto-filled)`);
+                } else {
+                    toast.info(res.message || "OTP Sent! Please enter the 6-digit verification code.");
+                }
                 return;
             }
 
