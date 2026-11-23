@@ -51,21 +51,26 @@ function sortPdfTextItems(items) {
     return yB - yA; // Top to bottom (higher Y value in PDF coordinate space is higher on page)
   });
 
-  let text = "";
-  let lastY = null;
-
+  const lineGroups = [];
   for (const item of validItems) {
-    const currentY = item.transform ? item.transform[5] : 0;
-    if (lastY !== null && Math.abs(lastY - currentY) >= 5) {
-      text += "\n";
-    } else if (text.length > 0 && !text.endsWith("\n") && !text.endsWith(" ")) {
-      text += " ";
+    const y = item.transform ? item.transform[5] : 0;
+    const existing = lineGroups.find((line) => Math.abs(line.y - y) < 5);
+    if (existing) {
+      existing.items.push(item);
+    } else {
+      lineGroups.push({ y, items: [item] });
     }
-    text += item.str.trim();
-    lastY = currentY;
   }
 
-  return text;
+  return lineGroups
+    .sort((a, b) => b.y - a.y)
+    .map((line) =>
+      line.items
+        .sort((a, b) => (a.transform?.[4] || 0) - (b.transform?.[4] || 0))
+        .map((item) => item.str.trim())
+        .join(" ")
+    )
+    .join("\n");
 }
 
 export async function extractTextFromFile(file, onProgress) {

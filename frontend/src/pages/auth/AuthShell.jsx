@@ -4,8 +4,14 @@ import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
-export function AuthShell({ title, subtitle, children }) {
+export function AuthShell({ title, subtitle, children, role = "user" }) {
     const { theme, setTheme } = useTheme();
+    const roleCopy = {
+      user: "Personal report review, trends, and AI health guidance.",
+      doctor: "Focused clinical review tools for patient report interpretation.",
+      lab_technician: "Structured report ingestion and laboratory result processing.",
+      hospital: "Organization-level reporting and clinical operational access.",
+    };
 
     return (
       <div className="min-h-screen bg-background text-foreground font-sans selection:bg-indigo-500/30 flex flex-col items-center justify-center p-4 relative transition-colors duration-300">
@@ -42,7 +48,7 @@ export function AuthShell({ title, subtitle, children }) {
                 </div>
                 <h2 className="text-3xl font-extrabold tracking-tight text-white">LabSense AI</h2>
                 <p className="mt-3 text-sm text-slate-300 leading-relaxed font-medium">
-                  Instant clinical lab report analysis, automated ML risk prediction, and Groq-powered AI diagnostic assistance.
+                  {roleCopy[role] || roleCopy.user}
                 </p>
                 <div className="mt-6 space-y-2.5 text-xs text-slate-300 font-semibold">
                   <div className="flex items-center gap-2">

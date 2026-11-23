@@ -206,6 +206,25 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleChangeRole = async (userId, role, userEmail) => {
+    try {
+      const result = await adminStatsService.updateUserRole(userId, role);
+      if (result.success) {
+        toast.success(`Updated role for ${userEmail}`);
+        setUserStats((prev) =>
+          prev.map((u) => (u.userId === userId ? { ...u, role } : u))
+        );
+        if (userId === user?.id && result.res?.user && result.res?.token) {
+          updateUser(result.res.user, result.res.token);
+        }
+      } else {
+        toast.error(result.error || "Failed to update user role");
+      }
+    } catch (error) {
+      toast.error("Error updating user role");
+    }
+  };
+
   const handleDeleteReport = async (reportId) => {
     try {
       const success = await adminStatsService.deleteReport(reportId);
@@ -414,6 +433,21 @@ export default function AdminDashboard() {
                       </div>
                       <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
                         <HardDrive className="h-6 w-6" />
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="glass-card border-border shadow-lg p-5">
+                    <CardContent className="p-0 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Groq AI Usage</p>
+                        <h3 className="text-3xl font-extrabold text-foreground mt-1">{(stats?.aiTotalTokens ?? 0).toLocaleString()}</h3>
+                        <div className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 mt-1">
+                          {stats?.aiRequestCount ?? 0} requests · Est. ${Number(stats?.aiEstimatedCostUsd ?? 0).toFixed(6)}
+                        </div>
+                      </div>
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                        <Activity className="h-6 w-6" />
                       </div>
                     </CardContent>
                   </Card>
@@ -795,6 +829,7 @@ export default function AdminDashboard() {
                       <th className="p-3.5">Role</th>
                       <th className="p-3.5">Joined Date</th>
                       <th className="p-3.5">Uploaded Reports</th>
+                      <th className="p-3.5">AI Usage</th>
                       <th className="p-3.5 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -813,25 +848,28 @@ export default function AdminDashboard() {
                           </td>
                           <td className="p-3.5 text-muted-foreground font-medium">{u.phoneNumber || "N/A"}</td>
                           <td className="p-3.5">
-                            <button
-                              type="button"
-                              onClick={() => handleToggleRole(u.userId, u.role, u.email)}
-                              title={`Click to switch role to ${u.role === 'admin' ? 'user' : 'admin'}`}
-                              className="focus:outline-none group"
+                            <select
+                              value={u.role}
+                              onChange={(e) => handleChangeRole(u.userId, e.target.value, u.email)}
+                              className="h-8 rounded-lg border border-border bg-card px-2 text-[11px] font-bold capitalize text-foreground"
                             >
-                              <Badge
-                                variant={u.role === "admin" ? "default" : "secondary"}
-                                className="capitalize text-[11px] font-bold cursor-pointer group-hover:ring-1 group-hover:ring-indigo-500 transition-all flex items-center gap-1.5 px-2.5 py-0.5 rounded-full"
-                              >
-                                {u.role}
-                                <span className="text-[9px] opacity-70">⇅</span>
-                              </Badge>
-                            </button>
+                              <option value="user">Normal user</option>
+                              <option value="doctor">Doctor</option>
+                              <option value="lab_technician">Lab technician</option>
+                              <option value="hospital">Hospital</option>
+                              <option value="admin">Admin</option>
+                            </select>
                           </td>
                           <td className="p-3.5 text-muted-foreground font-medium">
                             {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "N/A"}
                           </td>
                           <td className="p-3.5 font-bold text-indigo-600 dark:text-indigo-400">{u.reportsCount}</td>
+                          <td className="p-3.5">
+                            <div className="font-bold text-foreground">{(u.aiTotalTokens || 0).toLocaleString()} tokens</div>
+                            <div className="mt-0.5 text-[10px] text-muted-foreground">
+                              {u.aiRequestCount || 0} requests · Est. ${Number(u.aiEstimatedCostUsd || 0).toFixed(6)}
+                            </div>
+                          </td>
                           <td className="p-3.5 text-right">
                             {u.role !== "admin" && (
                               <AlertDialog>

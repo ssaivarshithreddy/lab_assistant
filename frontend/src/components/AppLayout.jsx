@@ -16,9 +16,28 @@ const nav = [
   { to: "/assistant", label: "AI Health Assistant", icon: MessageSquareHeart },
 ];
 
+const roleNavigation = {
+  doctor: [
+    { to: "/", label: "Patient Reports", icon: Upload, end: true },
+    { to: "/dashboard", label: "Clinical Dashboard", icon: LayoutDashboard },
+    { to: "/assistant", label: "Clinical Assistant", icon: MessageSquareHeart },
+  ],
+  lab_technician: [
+    { to: "/", label: "Ingest Report", icon: Upload, end: true },
+    { to: "/dashboard", label: "Lab Records", icon: LayoutDashboard },
+    { to: "/assistant", label: "Report Assistant", icon: MessageSquareHeart },
+  ],
+  hospital: [
+    { to: "/", label: "Add Reports", icon: Upload, end: true },
+    { to: "/dashboard", label: "Organization Dashboard", icon: LayoutDashboard },
+    { to: "/assistant", label: "Clinical Assistant", icon: MessageSquareHeart },
+  ],
+};
+
 const AppLayout = () => {
   const { theme, setTheme } = useTheme();
   const { user, logout } = useAuth();
+  const navigationItems = roleNavigation[user?.role] || nav;
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [profileOpen, setProfileOpen] = useState(false);
@@ -50,7 +69,7 @@ const AppLayout = () => {
 
           {/* Desktop Navigation Links */}
           <nav className="hidden items-center gap-2 md:flex bg-slate-100/80 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800/80 p-1.5 rounded-2xl backdrop-blur-md">
-            {nav.map(({ to, label, icon: Icon, end }) => {
+            {navigationItems.map(({ to, label, icon: Icon, end }) => {
               const isActive = end ? pathname === "/" : (to !== "/" && pathname.startsWith(to));
               return (
                 <NavLink
@@ -138,7 +157,7 @@ const AppLayout = () => {
 
         {/* Mobile Navigation Bar */}
         <nav className="container mx-auto max-w-7xl flex gap-1 overflow-x-auto px-4 pb-3 md:hidden">
-          {nav.map(({ to, label, icon: Icon, end }) => {
+          {navigationItems.map(({ to, label, icon: Icon, end }) => {
             const isActive = end ? pathname === "/" : (to !== "/" && pathname.startsWith(to));
             return (
               <NavLink

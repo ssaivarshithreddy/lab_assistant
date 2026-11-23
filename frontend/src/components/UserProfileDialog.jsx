@@ -44,6 +44,11 @@ export function UserProfileDialog({ open, onOpenChange }) {
   // 2FA state
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(user?.two_factor_enabled || false);
   const [toggling2FA, setToggling2FA] = useState(false);
+  const [showPasscodeSetup, setShowPasscodeSetup] = useState(false);
+  const [passcodeInput, setPasscodeInput] = useState("");
+  const [confirmPasscodeInput, setConfirmPasscodeInput] = useState("");
+  const [currentPasscodeInput, setCurrentPasscodeInput] = useState("");
+  const [showChangePasscode, setShowChangePasscode] = useState(false);
 
   useEffect(() => {
     if (user && open) {
@@ -116,15 +121,72 @@ export function UserProfileDialog({ open, onOpenChange }) {
     }
   };
 
-  const handleToggle2FA = async (targetState) => {
+  const handleEnable2FAPasscode = async (e) => {
+    e.preventDefault();
+    if (!passcodeInput || passcodeInput.trim().length < 4) {
+      toast.error("Passcode (PIN) must be between 4 and 6 digits.");
+      return;
+    }
+    if (passcodeInput !== confirmPasscodeInput) {
+      toast.error("Passcodes do not match.");
+      return;
+    }
+
     setToggling2FA(true);
     try {
-      const res = await apiClient.toggle2Fa(targetState);
-      toast.success(res?.message || `Two-Factor Security updated!`);
-      setTwoFactorEnabled(targetState);
-      updateUser({ ...user, two_factor_enabled: targetState });
+      const res = await apiClient.toggle2Fa({ enabled: true, passcode: passcodeInput.trim() });
+      toast.success(res?.message || "Passcode 2FA enabled successfully!");
+      setTwoFactorEnabled(true);
+      updateUser({ ...user, two_factor_enabled: true });
+      setShowPasscodeSetup(false);
+      setPasscodeInput("");
+      setConfirmPasscodeInput("");
     } catch (err) {
-      toast.error(err.message || "Failed to update 2FA setting");
+      toast.error(err.message || "Failed to enable 2FA passcode");
+    } finally {
+      setToggling2FA(false);
+    }
+  };
+
+  const handleDisable2FA = async () => {
+    setToggling2FA(true);
+    try {
+      const res = await apiClient.toggle2Fa({ enabled: false });
+      toast.success(res?.message || "2FA disabled successfully");
+      setTwoFactorEnabled(false);
+      updateUser({ ...user, two_factor_enabled: false });
+      setShowChangePasscode(false);
+    } catch (err) {
+      toast.error(err.message || "Failed to disable 2FA");
+    } finally {
+      setToggling2FA(false);
+    }
+  };
+
+  const handleChangePasscode = async (e) => {
+    e.preventDefault();
+    if (!passcodeInput || passcodeInput.trim().length < 4) {
+      toast.error("New passcode (PIN) must be between 4 and 6 digits.");
+      return;
+    }
+    if (passcodeInput !== confirmPasscodeInput) {
+      toast.error("New passcodes do not match.");
+      return;
+    }
+
+    setToggling2FA(true);
+    try {
+      const res = await apiClient.set2FaPasscode({
+        passcode: passcodeInput.trim(),
+        current_passcode: currentPasscodeInput.trim() || undefined,
+      });
+      toast.success(res?.message || "Passcode updated successfully!");
+      setShowChangePasscode(false);
+      setCurrentPasscodeInput("");
+      setPasscodeInput("");
+      setConfirmPasscodeInput("");
+    } catch (err) {
+      toast.error(err.message || "Failed to update passcode");
     } finally {
       setToggling2FA(false);
     }
@@ -390,33 +452,175 @@ export function UserProfileDialog({ open, onOpenChange }) {
 
           {/* TAB 2: SECURITY & 2FA */}
           <TabsContent value="security" className="space-y-4 m-0 focus-visible:outline-none">
-            {/* Two-Factor Security Control */}
+            {/* Two-Factor Passcode Security Control */}
             <div className="rounded-2xl border border-border bg-gradient-to-br from-card to-muted/40 p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="h-5 w-5 text-indigo-500" />
                   <div>
-                    <div className="text-xs font-extrabold text-foreground">Two-Factor Security (2FA)</div>
-                    <div className="text-[11px] text-muted-foreground">OTP verification required at login</div>
+                    <div className="text-xs font-extrabold text-foreground">Two-Factor Security (Passcode PIN)</div>
+                    <div className="text-[11px] text-muted-foreground">Personal 4-6 digit PIN required at login (no email needed)</div>
                   </div>
                 </div>
-                <Button
-                  type="button"
-                  variant={twoFactorEnabled ? "destructive" : "default"}
-                  size="sm"
-                  disabled={toggling2FA}
-                  onClick={() => handleToggle2FA(!twoFactorEnabled)}
-                  className="h-8 text-xs font-bold rounded-xl px-4"
-                >
-                  {toggling2FA ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-                  {twoFactorEnabled ? "Disable 2FA" : "Enable 2FA"}
-                </Button>
+                {twoFactorEnabled ? (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    disabled={toggling2FA}
+                    onClick={handleDisable2FA}
+                    className="h-8 text-xs font-bold rounded-xl px-4"
+                  >
+                    {toggling2FA ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                    Disable 2FA
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="sm"
+                    disabled={toggling2FA}
+                    onClick={() => setShowPasscodeSetup((s) => !s)}
+                    className="h-8 text-xs font-bold rounded-xl px-4 bg-indigo-600 hover:bg-indigo-500 text-white"
+                  >
+                    {showPasscodeSetup ? "Cancel" : "Enable Passcode 2FA"}
+                  </Button>
+                )}
               </div>
+
               <p className="text-[11px] text-muted-foreground leading-relaxed">
                 {twoFactorEnabled
-                  ? "🔒 Two-Factor Protection is ACTIVE. A security verification OTP will be required on each sign-in."
-                  : "Enable 2FA to protect your medical lab account with mandatory security codes on login."}
+                  ? "🔒 Passcode 2FA is ACTIVE. You will be prompted for your personal PIN on each sign-in."
+                  : "Protect your medical lab account with an offline Security PIN on login. No external SMS or email required."}
               </p>
+
+              {/* Passcode Setup Form when enabling 2FA */}
+              {showPasscodeSetup && !twoFactorEnabled && (
+                <form onSubmit={handleEnable2FAPasscode} className="space-y-2.5 pt-2 border-t border-border/60">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] font-semibold text-foreground">Set 4-6 Digit PIN</label>
+                      <Input
+                        type="password"
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={passcodeInput}
+                        onChange={(e) => setPasscodeInput(e.target.value.replace(/[^0-9]/g, ""))}
+                        placeholder="e.g. 123456"
+                        required
+                        className="h-8 text-xs font-mono tracking-widest text-center rounded-xl bg-background border-border"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-foreground">Confirm PIN</label>
+                      <Input
+                        type="password"
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={confirmPasscodeInput}
+                        onChange={(e) => setConfirmPasscodeInput(e.target.value.replace(/[^0-9]/g, ""))}
+                        placeholder="Confirm PIN"
+                        required
+                        className="h-8 text-xs font-mono tracking-widest text-center rounded-xl bg-background border-border"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={toggling2FA}
+                    className="w-full h-8 text-xs font-bold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-sm"
+                  >
+                    {toggling2FA ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <ShieldCheck className="h-3 w-3 mr-1" />}
+                    Save PIN & Activate 2FA
+                  </Button>
+                </form>
+              )}
+
+              {/* Option to change passcode when 2FA is already active */}
+              {twoFactorEnabled && (
+                <div className="pt-2 border-t border-border/60">
+                  {!showChangePasscode ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowChangePasscode(true)}
+                      className="h-7 text-xs text-indigo-500 hover:text-indigo-400 p-0"
+                    >
+                      Need to change your Security PIN? Click here
+                    </Button>
+                  ) : (
+                    <form onSubmit={handleChangePasscode} className="space-y-2.5 pt-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div>
+                          <label className="text-[10px] font-semibold text-foreground">Current PIN</label>
+                          <Input
+                            type="password"
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={currentPasscodeInput}
+                            onChange={(e) => setCurrentPasscodeInput(e.target.value.replace(/[^0-9]/g, ""))}
+                            placeholder="Current PIN"
+                            className="h-8 text-xs font-mono tracking-widest text-center rounded-xl bg-background border-border"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-semibold text-foreground">New PIN</label>
+                          <Input
+                            type="password"
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={passcodeInput}
+                            onChange={(e) => setPasscodeInput(e.target.value.replace(/[^0-9]/g, ""))}
+                            placeholder="New PIN"
+                            required
+                            className="h-8 text-xs font-mono tracking-widest text-center rounded-xl bg-background border-border"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-semibold text-foreground">Confirm New</label>
+                          <Input
+                            type="password"
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={confirmPasscodeInput}
+                            onChange={(e) => setConfirmPasscodeInput(e.target.value.replace(/[^0-9]/g, ""))}
+                            placeholder="Confirm"
+                            required
+                            className="h-8 text-xs font-mono tracking-widest text-center rounded-xl bg-background border-border"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="submit"
+                          size="sm"
+                          disabled={toggling2FA}
+                          className="h-8 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white flex-1"
+                        >
+                          {toggling2FA ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                          Update Security PIN
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setShowChangePasscode(false);
+                            setCurrentPasscodeInput("");
+                            setPasscodeInput("");
+                            setConfirmPasscodeInput("");
+                          }}
+                          className="h-8 text-xs rounded-xl"
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Change Password Form */}

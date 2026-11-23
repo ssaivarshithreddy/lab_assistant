@@ -21,6 +21,11 @@ export const adminStatsService = {
         usersCreatedThisMonth: totalUsers,
         reportsCreatedToday: totalReports,
         reportsCreatedThisMonth: totalReports,
+        aiRequestCount: stats.ai_request_count || 0,
+        aiPromptTokens: stats.ai_prompt_tokens || 0,
+        aiCompletionTokens: stats.ai_completion_tokens || 0,
+        aiTotalTokens: stats.ai_total_tokens || 0,
+        aiEstimatedCostUsd: Number(stats.ai_estimated_cost_usd || 0),
       };
     } catch (error) {
       console.warn("Failed to fetch system stats:", error.message);
@@ -40,6 +45,11 @@ export const adminStatsService = {
         createdAt: u.created_at,
         reportsCount: parseInt(u.reports_count || 0, 10),
         totalStorageBytes: parseInt(u.reports_count || 0, 10) * 1024 * 180,
+        aiRequestCount: parseInt(u.ai_request_count || 0, 10),
+        aiPromptTokens: parseInt(u.prompt_tokens || 0, 10),
+        aiCompletionTokens: parseInt(u.completion_tokens || 0, 10),
+        aiTotalTokens: parseInt(u.total_tokens || 0, 10),
+        aiEstimatedCostUsd: Number(u.estimated_cost_usd || 0),
       }));
     } catch (error) {
       console.error("Error getting user stats:", error);
