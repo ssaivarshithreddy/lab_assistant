@@ -76,6 +76,71 @@ function normalizeGeneric(metric, v) {
   return x;
 }
 
+function toMetricKey(name) {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+}
+
+function parseReferenceRange(line) {
+  const rangeMatch = line.match(/(?:ref(?:erence)?(?:\s*range)?|normal)[:\s]*([0-9][0-9.,]*\s*(?:-|–|to)\s*[0-9][0-9.,]*)/i);
+  if (!rangeMatch) return null;
+  return rangeMatch[1].replace(/\s+/g, "");
+}
+
+function inferGenericStatus(value, rangeText) {
+  if (!rangeText) return "normal";
+  const match = rangeText.match(/([0-9]+(?:\.[0-9]+)?)[\s]*(?:-|–|to)[\s]*([0-9]+(?:\.[0-9]+)?)/i);
+  if (!match) return "normal";
+  const low = Number(match[1]);
+  const high = Number(match[2]);
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return "normal";
+  if (value < low) return "low";
+  if (value > high) return "high";
+  return "normal";
+}
+
+function extractAdditionalMetricRows(text) {
+  const knownNames = [
+    "hemoglobin","haemoglobin","hb","hgb","wbc","white blood cell","rbc","red blood cell","platelets","platelet","glucose","blood sugar",
+    "hematocrit","hct","pcv","mcv","mean corpuscular volume","mch","mean corpuscular hemoglobin","mchc",
+    "mean corpuscular hemoglobin concentration","neutrophils","neutrophil","lymphocytes","lymphocyte","monocytes","monocyte",
+    "eosinophils","eosinophil","basophils","basophil","creatinine","serum creatinine","urea","blood urea","bun","blood urea nitrogen",
+    "sodium","potassium","chloride","calcium","bilirubin","total bilirubin","ast","sgot","alt","sgpt","alp","alkaline phosphatase","crp","c-reactive protein","hba1c","glycated hemoglobin"
+  ];
+  const units = "(?:mg/dl|g/dl|mmol/l|mEq/l|meq/l|ng/ml|pg/ml|pg|fl|u/l|iu/l|%|10\\^\\d|10\\s*[*x]\\s*\\d+/l|lakhs?/cumm|cells?/cumm|x10\\^\\d+/?l)";
+  const extra = {};
+
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const clean = line.replace(/\t/g," ").replace(/\s{2,}/g," ").trim();
+    if (clean.length < 4 || /\b(?:page|address|phone|email|doctor|patient|collected|printed|authorized)\b/i.test(clean)) continue;
+
+    const match = clean.match(/^([^:=]{2,55}?)[\s:=|]+(-?\d+(?:\.\d+)?)\s*([^\s,%]*(?:%|mg\/dl|g\/dl|mmol\/l|mEq\/l|meq\/l|ng\/ml|pg\/ml|pg|fl|u\/l|iu\/l|10\^[0-9]+\/l|lakhs\/cumm|cells\/cumm)?)?/i);
+    if (!match) continue;
+
+    const label = match[1].replace(/[:|]/g," ").replace(/\s+/g," ").trim();
+    const key = toMetricKey(label);
+    if (!key || knownNames.some((name) => toMetricKey(name) === key)) continue;
+    if (/(?:age|gender|sex|year|date|time|sample|patient|phone|report|page|bill|invoice|mrn|id)\b/i.test(label)) continue;
+
+    const value = Number(match[2]);
+    if (!Number.isFinite(value)) continue;
+    const unit = String(match[3] || "").trim();
+    const rangeText = parseReferenceRange(clean);
+    extra[key] = {
+      name: label,
+      value,
+      unit,
+      status: inferGenericStatus(value, rangeText),
+      range: rangeText || undefined,
+      source: "dynamic-row",
+    };
+  }
+  return extra;
+}
+
 function extractValues(text) {
   return {
     hemoglobin: (() => {
@@ -486,6 +551,8 @@ export async function analyzeReport(rawText, fileName) {
 
   // 1. Extract numeric values via regex
   const values = extractValues(text);
+  const additionalValues = extractAdditionalMetricRows(text);
+  Object.assign(values, additionalValues);
 
   // 5. Optionally call ClinicalBERT for entity enrichment
   const apiKey = import.meta.env.VITE_AI_GATEWAY_KEY;

@@ -40,7 +40,7 @@ import { apiClient } from "@/lib/apiClient";
 import { PrivacyBadge } from "@/components/PrivacyBadge";
 import { getLocalReportById, getLocalReports } from "@/lib/localReports";
 import { runAiConnectivityTest } from "@/lib/aiConnectivity";
-import { streamGroqChat, validateMessage, cleanModelResponse } from "@/lib/groqService";
+import { validateMessage, cleanModelResponse } from "@/lib/groqService";
 import { retrieveRagContext } from "@/lib/ragEngine";
 import { MedicalReasoningCard } from "@/components/MedicalReasoningCard";
 import { cn } from "@/lib/utils";
@@ -404,44 +404,21 @@ ${summary}
 
       let assistantReply = "";
 
-      if (import.meta.env.VITE_GROQ_API_KEY) {
-        try {
-          let assistantContent = "";
-          const chatMessages = next.map((m) => ({
-            role: m.role,
-            content: m.content,
-          }));
-          await streamGroqChat({
-            messages: chatMessages,
-            metricsContext: values,
-            reportSummary: summary,
-            ragPromptText,
-            temperature: 0.7,
-            maxTokens: 1024,
-            onChunk: (chunk) => {
-              assistantContent += chunk;
-              const cleanedText = cleanModelResponse(assistantContent);
-              setMessages((prev) =>
-                prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: cleanedText, citations, medicalGuidelines } : m))
-              );
-            },
-          });
-          assistantReply = cleanModelResponse(assistantContent);
-          setMessages((prev) => [...prev.slice(0, -1), { role: "assistant", content: assistantReply, citations, medicalGuidelines }]);
-        } catch (groqErr) {
-          console.warn("Groq API failed, using local response:", groqErr);
-          assistantReply = buildLocalAssistantReply(text, medicalGuidelines);
-          setMessages((prev) => [...prev, { role: "assistant", content: assistantReply, citations, medicalGuidelines }]);
-        }
-      } else {
+      try {
+        const serverReply = await apiClient.askChat({
+          message: text,
+          report_id: report?.id && !String(report.id).startsWith("local_") ? report.id : null,
+          active_values: values,
+        });
+        assistantReply = cleanModelResponse(serverReply.reply || "");
+        setMessages((prev) => [...prev.slice(0, -1), { role: "assistant", content: assistantReply, citations: serverReply.citations || citations, medicalGuidelines: serverReply.medicalGuidelines || medicalGuidelines }]);
+      } catch (serverErr) {
+        console.warn("Server AI chat failed, using local response:", serverErr);
         assistantReply = buildLocalAssistantReply(text, medicalGuidelines);
         setMessages((prev) => [...prev, { role: "assistant", content: assistantReply, citations, medicalGuidelines }]);
       }
 
       try {
-        const activeReportId = report?.id && !String(report.id).startsWith("local_") ? report.id : null;
-        await apiClient.sendChatMessage({ report_id: activeReportId, role: "user", content: text });
-        await apiClient.sendChatMessage({ report_id: activeReportId, role: "assistant", content: assistantReply });
         loadThreadsAndReports();
       } catch (dbErr) {
         console.warn("Failed to save chat message to database:", dbErr.message);

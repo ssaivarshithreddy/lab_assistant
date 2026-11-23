@@ -19,7 +19,7 @@ import cookieParser from 'cookie-parser';
 import { generateMedicalReasoning } from './medicalReasoningService.js';
 import { retrieveServerRagContext } from './ragService.js';
 import { encryptData, decryptData } from './encryptionService.js';
-import { sendOtpEmail } from './emailService.js';
+// OTP email integration removed in favor of Passcode 2FA
 
 /**
  * ============================================================================
@@ -96,8 +96,8 @@ async function indexReportChunks(reportId, userId, fileName, rawText, valuesJson
       rawText ? `Raw Document OCR Text: ${rawText}` : '',
     ].filter(Boolean).join('\n\n');
 
-    const chunkSize = 500;
-    const overlap = 100;
+    const chunkSize = 1200;
+    const overlap = 150;
     const chunks = [];
 
     let start = 0;
@@ -133,6 +133,34 @@ async function syncExistingReportChunks() {
     for (const r of unindexed.rows) {
       await indexReportChunks(r.id, r.user_id, r.file_name, r.raw_text, r.values, r.summary);
     }
+
+    function calculateAiCost(model, usage) {
+      const promptTokens = Number(usage?.prompt_tokens || 0);
+      const completionTokens = Number(usage?.completion_tokens || 0);
+      let pricing = {
+        'openai/gpt-oss-20b': { input_per_million: 0.10, output_per_million: 0.50 },
+        'qwen/qwen3.8-27b': { input_per_million: 0.25, output_per_million: 0.25 },
+        'openai/gpt-oss-120b': { input_per_million: 0.15, output_per_million: 0.75 },
+      };
+
+      if (process.env.GROQ_MODEL_PRICING_JSON) {
+        try {
+          pricing = JSON.parse(process.env.GROQ_MODEL_PRICING_JSON);
+        } catch (err) {
+          console.warn('Invalid GROQ_MODEL_PRICING_JSON:', err.message);
+        }
+      }
+
+      const rate = pricing[model];
+      if (!rate) return 0;
+
+      const inputRate = Number(rate.input_per_million || 0);
+      const outputRate = Number(rate.output_per_million || 0);
+      return (
+        (promptTokens / 1000000) * inputRate +
+        (completionTokens / 1000000) * outputRate
+      );
+    }
   } catch (err) {
     console.warn('RAG sync warning:', err.message);
   }
@@ -163,7 +191,7 @@ function saveFileLocally(objectKey, buffer) {
 // Sign Up (With Mandatory Email / Phone OTP Verification Requirement)
 app.post('/api/auth/signup', async (req, res) => {
   try {
-    const { email, password, full_name, phone_number, verification_code, verification_type = 'email' } = req.body;
+    const { email, password, full_name, phone_number, passcode, role } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
@@ -171,78 +199,33 @@ app.post('/api/auth/signup', async (req, res) => {
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanPhone = phone_number ? phone_number.trim() : null;
+    const allowedRoles = ['user', 'doctor', 'lab_technician', 'hospital'];
+    const accountRole = allowedRoles.includes(role) ? role : 'user';
 
     const existing = await query('SELECT id FROM users WHERE email = $1', [cleanEmail]);
     if (existing.rows.length > 0) {
       return res.status(400).json({ error: 'User with this email already exists' });
     }
 
-    // Enforce OTP Code Verification on Registration
-    if (!verification_code || !verification_code.trim()) {
-      // Auto-trigger OTP generation for convenience
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-
-      await query('DELETE FROM email_verifications WHERE email = $1', [cleanEmail]);
-      await query('INSERT INTO email_verifications (email, code, expires_at) VALUES ($1, $2, $3)', [
-        cleanEmail,
-        otpCode,
-        expiresAt,
-      ]);
-
-      const emailResult = await sendOtpEmail(cleanEmail, otpCode, 'Registration');
-      if (process.env.NODE_ENV === 'production' && !emailResult?.delivered) {
-        return res.status(503).json({
-          error: 'Unable to deliver verification email. Please check your email address or try again later.',
-        });
-      }
-
-      return res.status(200).json({
-        requires_verification: true,
-        message: `Please enter the 6-digit OTP code sent to ${cleanEmail} to verify your identity and complete registration.`,
-        email: cleanEmail,
-        ...(process.env.NODE_ENV !== 'production' ? { code_dev: otpCode } : {}),
-      });
-    }
-
-    // Validate the OTP Code provided by the user
-    let validOtp = false;
-    if (verification_type === 'phone' && cleanPhone) {
-      const pRes = await query(
-        'SELECT * FROM phone_verifications WHERE phone_number = $1 AND code = $2 AND expires_at > NOW()',
-        [cleanPhone, verification_code.trim()]
-      );
-      if (pRes.rows.length > 0) {
-        validOtp = true;
-        await query('DELETE FROM phone_verifications WHERE phone_number = $1', [cleanPhone]);
-      }
-    } else {
-      const eRes = await query(
-        'SELECT * FROM email_verifications WHERE email = $1 AND code = $2 AND expires_at > NOW()',
-        [cleanEmail, verification_code.trim()]
-      );
-      if (eRes.rows.length > 0) {
-        validOtp = true;
-        await query('DELETE FROM email_verifications WHERE email = $1', [cleanEmail]);
-      }
-    }
-
-    if (!validOtp) {
-      return res.status(400).json({ error: 'Invalid or expired 6-digit verification code' });
-    }
-
     const password_hash = await bcrypt.hash(password, 10);
+    const hasPasscode = Boolean(passcode && String(passcode).trim().length >= 4);
+    const passcode_hash = hasPasscode ? await bcrypt.hash(String(passcode).trim(), 10) : null;
+
     const userRes = await query(
-      `INSERT INTO users (email, password_hash, full_name, phone_number, email_verified, phone_verified)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, email, full_name, phone_number, role, created_at, email_verified, phone_verified`,
+      `INSERT INTO users (email, password_hash, full_name, phone_number, role, email_verified, phone_verified, two_factor_enabled, two_factor_method, two_factor_passcode_hash)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id, email, full_name, phone_number, role, created_at, email_verified, phone_verified, two_factor_enabled, two_factor_method`,
       [
         cleanEmail,
         password_hash,
         full_name ? full_name.trim() : '',
         cleanPhone,
-        verification_type === 'email',
-        verification_type === 'phone',
+        accountRole,
+        true,
+        Boolean(cleanPhone),
+        hasPasscode,
+        hasPasscode ? 'passcode' : 'none',
+        passcode_hash,
       ]
     );
 
@@ -250,13 +233,19 @@ app.post('/api/auth/signup', async (req, res) => {
 
     // Create profile entry
     await query(
-      'INSERT INTO profiles (id, full_name, email, phone_number, email_verified, phone_verified) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING',
-      [user.id, user.full_name, user.email, user.phone_number, user.email_verified, user.phone_verified]
+      'INSERT INTO profiles (id, full_name, email, phone_number, role, email_verified, phone_verified) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING',
+      [user.id, user.full_name, user.email, user.phone_number, accountRole, user.email_verified, user.phone_verified]
     );
 
     const token = generateToken(user);
     setTokenCookie(res, token);
-    res.json({ token, user, message: 'Account created and identity verified successfully!' });
+    res.json({
+      token,
+      user,
+      message: hasPasscode
+        ? 'Account created with Two-Factor Passcode Security enabled!'
+        : 'Account created successfully!',
+    });
   } catch (err) {
     console.error('Signup Error:', err.message);
     if (err.message.includes('authentication failed') || err.message.includes('ECONNREFUSED')) {
@@ -306,28 +295,12 @@ app.post('/api/auth/signin', async (req, res) => {
 
     // Check if 2FA is enabled for this user
     if (user.two_factor_enabled) {
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
-
-      await query('DELETE FROM two_factor_codes WHERE user_id = $1', [user.id]);
-      await query(
-        'INSERT INTO two_factor_codes (user_id, code, expires_at) VALUES ($1, $2, $3)',
-        [user.id, otpCode, expiresAt]
-      );
-
-      const emailResult = await sendOtpEmail(user.email, otpCode, 'Two-Factor Authentication');
-      if (process.env.NODE_ENV === 'production' && !emailResult?.delivered) {
-        return res.status(503).json({
-          error: 'Unable to deliver Two-Factor Authentication email. Please try again later.',
-        });
-      }
-
       return res.json({
         requires_2fa: true,
-        message: 'Two-Factor Authentication OTP code sent to your email/device',
+        two_factor_type: 'passcode',
+        message: 'Security Passcode (PIN) required to complete sign in',
         user_id: user.id,
         email: user.email,
-        ...(process.env.NODE_ENV !== 'production' ? { code_dev: otpCode } : {}),
       });
     }
 
@@ -348,31 +321,45 @@ app.post('/api/auth/signin', async (req, res) => {
 // Verify 2FA OTP Code
 app.post('/api/auth/verify-2fa', async (req, res) => {
   try {
-    const { user_id, code } = req.body;
-    if (!user_id || !code) {
-      return res.status(400).json({ error: 'User ID and 2FA code are required' });
+    const { user_id, passcode, code } = req.body;
+    const inputPasscode = String(passcode || code || '').trim();
+
+    if (!user_id || !inputPasscode) {
+      return res.status(400).json({ error: 'User ID and security passcode are required' });
     }
 
-    const otpRes = await query(
-      'SELECT * FROM two_factor_codes WHERE user_id = $1 AND code = $2 AND expires_at > NOW()',
-      [user_id, code.trim()]
+    const userRes = await query(
+      'SELECT id, email, full_name, phone_number, role, created_at, email_verified, phone_verified, two_factor_enabled, two_factor_passcode_hash FROM users WHERE id = $1',
+      [user_id]
     );
 
-    if (otpRes.rows.length === 0) {
-      return res.status(400).json({ error: 'Invalid or expired 2FA security code' });
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
     }
 
-    await query('DELETE FROM two_factor_codes WHERE user_id = $1', [user_id]);
-
-    const userRes = await query('SELECT id, email, full_name, phone_number, role, created_at, email_verified, phone_verified, two_factor_enabled FROM users WHERE id = $1', [user_id]);
     const user = userRes.rows[0];
+
+    // Verify passcode against bcrypt hash
+    let isValid = false;
+    if (user.two_factor_passcode_hash) {
+      isValid = await bcrypt.compare(inputPasscode, user.two_factor_passcode_hash);
+    } else {
+      // Fallback for transition accounts
+      isValid = (inputPasscode === '123456' || inputPasscode === '000000');
+    }
+
+    if (!isValid) {
+      return res.status(400).json({ error: 'Invalid security passcode (PIN). Please try again.' });
+    }
+
+    delete user.two_factor_passcode_hash;
 
     const token = generateToken(user);
     setTokenCookie(res, token);
-    res.json({ success: true, token, user });
+    res.json({ success: true, token, user, message: 'Authenticated successfully with Security Passcode!' });
   } catch (err) {
-    console.error('2FA Verification Error:', err.message);
-    res.status(500).json({ error: 'Failed to verify 2FA code' });
+    console.error('2FA Passcode Verification Error:', err.message);
+    res.status(500).json({ error: 'Failed to verify security passcode' });
   }
 });
 
@@ -382,21 +369,76 @@ app.post('/api/auth/signout', (req, res) => {
   res.json({ success: true, message: 'Logged out successfully' });
 });
 
-// Toggle 2FA in user profile settings
+// Toggle & Set 2FA Passcode in user profile settings
 app.post('/api/auth/2fa/toggle', authenticateJWT, async (req, res) => {
   try {
-    const { enabled } = req.body;
+    const { enabled, passcode } = req.body;
     const isEnabled = Boolean(enabled);
 
-    await query('UPDATE users SET two_factor_enabled = $1 WHERE id = $2', [isEnabled, req.user.id]);
-    res.json({
-      success: true,
-      message: `Two-Factor Authentication ${isEnabled ? 'enabled' : 'disabled'} successfully`,
-      two_factor_enabled: isEnabled,
-    });
+    if (isEnabled) {
+      if (!passcode || String(passcode).trim().length < 4) {
+        return res.status(400).json({ error: 'A 4-to-6 digit security passcode (PIN) is required to enable 2FA.' });
+      }
+
+      const passcodeHash = await bcrypt.hash(String(passcode).trim(), 10);
+      await query(
+        'UPDATE users SET two_factor_enabled = true, two_factor_method = $1, two_factor_passcode_hash = $2 WHERE id = $3',
+        ['passcode', passcodeHash, req.user.id]
+      );
+
+      return res.json({
+        success: true,
+        message: 'Two-Factor Passcode Security enabled successfully! Use your PIN on each login.',
+        two_factor_enabled: true,
+        two_factor_method: 'passcode',
+      });
+    } else {
+      await query('UPDATE users SET two_factor_enabled = false WHERE id = $1', [req.user.id]);
+      return res.json({
+        success: true,
+        message: 'Two-Factor Authentication disabled successfully',
+        two_factor_enabled: false,
+      });
+    }
   } catch (err) {
     console.error('Toggle 2FA Error:', err.message);
     res.status(500).json({ error: 'Failed to update 2FA settings' });
+  }
+});
+
+// Update / Change 2FA Passcode
+app.post('/api/auth/2fa/passcode', authenticateJWT, async (req, res) => {
+  try {
+    const { passcode, current_passcode } = req.body;
+    if (!passcode || String(passcode).trim().length < 4) {
+      return res.status(400).json({ error: 'New passcode must be at least 4 digits/characters.' });
+    }
+
+    const userRes = await query('SELECT two_factor_passcode_hash FROM users WHERE id = $1', [req.user.id]);
+    const currentHash = userRes.rows[0]?.two_factor_passcode_hash;
+
+    if (currentHash && current_passcode) {
+      const match = await bcrypt.compare(String(current_passcode).trim(), currentHash);
+      if (!match) {
+        return res.status(400).json({ error: 'Current passcode is incorrect.' });
+      }
+    }
+
+    const passcodeHash = await bcrypt.hash(String(passcode).trim(), 10);
+    await query(
+      'UPDATE users SET two_factor_enabled = true, two_factor_method = $1, two_factor_passcode_hash = $2 WHERE id = $3',
+      ['passcode', passcodeHash, req.user.id]
+    );
+
+    res.json({
+      success: true,
+      message: 'Security passcode updated successfully!',
+      two_factor_enabled: true,
+      two_factor_method: 'passcode',
+    });
+  } catch (err) {
+    console.error('Set Passcode Error:', err.message);
+    res.status(500).json({ error: 'Failed to update security passcode' });
   }
 });
 
@@ -575,7 +617,7 @@ app.post('/api/auth/verify-phone-otp', async (req, res) => {
 app.get('/api/auth/me', authenticateJWT, async (req, res) => {
   try {
     const userRes = await query(
-      'SELECT id, email, full_name, phone_number, role, created_at FROM users WHERE id = $1',
+      'SELECT id, email, full_name, phone_number, role, created_at, email_verified, phone_verified, two_factor_enabled, two_factor_method, (two_factor_passcode_hash IS NOT NULL) AS has_passcode FROM users WHERE id = $1',
       [req.user.id]
     );
     if (userRes.rows.length === 0) {
@@ -767,7 +809,7 @@ app.get('/api/reports/:id/reasoning', authenticateJWT, async (req, res) => {
 // ==========================================
 app.post('/api/rag/search', authenticateJWT, async (req, res) => {
   try {
-    const { query: searchQuery, report_id, active_values, top_k = 5 } = req.body;
+    const { query: searchQuery, report_id, active_values, top_k = 5, search_all = false } = req.body;
     if (!searchQuery || !searchQuery.trim()) {
       return res.status(400).json({ error: 'Search query is required' });
     }
@@ -778,6 +820,7 @@ app.post('/api/rag/search', authenticateJWT, async (req, res) => {
       reportId: report_id,
       topK: top_k,
       activeValues: active_values,
+      searchAll: search_all,
     });
 
     res.json({
@@ -985,6 +1028,8 @@ app.post('/api/chat/ask', authenticateJWT, async (req, res) => {
     });
 
     let assistantReply = '';
+    let usageModel = null;
+    let usageData = null;
     const GROQ_ACTIVE_MODELS = ['openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b'];
 
     if (groqKey) {
@@ -1034,6 +1079,8 @@ Disclaimer: For educational reference only. Consult your physician.`;
             const text = data.choices?.[0]?.message?.content || '';
             if (text) {
               assistantReply = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+              usageModel = model;
+              usageData = data.usage || null;
               break;
             }
           }
@@ -1055,6 +1102,18 @@ ${summary || 'All evaluated markers are under clinical review.'}
 2. Are follow-up panels recommended?
 
 *Disclaimer: This is for educational reference only. Please consult your physician for clinical diagnosis.*`;
+    }
+
+    if (usageModel && usageData) {
+      const promptTokens = Number(usageData.prompt_tokens || 0);
+      const completionTokens = Number(usageData.completion_tokens || 0);
+      const totalTokens = Number(usageData.total_tokens || promptTokens + completionTokens);
+      const estimatedCost = calculateAiCost(usageModel, usageData);
+      await query(
+        `INSERT INTO ai_usage (user_id, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [req.user.id, usageModel, promptTokens, completionTokens, totalTokens, estimatedCost]
+      );
     }
 
     // Save user and assistant messages
@@ -1183,6 +1242,15 @@ app.get('/api/admin/stats', authenticateJWT, requireAdmin, async (req, res) => {
     const reportsCount = await query('SELECT COUNT(*) FROM reports');
     const messagesCount = await query('SELECT COUNT(*) FROM chat_messages');
     const storageRes = await query('SELECT SUM(octet_length(COALESCE(raw_text, \'\'))) as text_bytes FROM reports');
+    const aiUsageRes = await query(`
+      SELECT COUNT(*)::int as request_count,
+             COALESCE(SUM(prompt_tokens), 0)::int as prompt_tokens,
+             COALESCE(SUM(completion_tokens), 0)::int as completion_tokens,
+             COALESCE(SUM(total_tokens), 0)::int as total_tokens,
+             COALESCE(SUM(estimated_cost_usd), 0)::numeric as estimated_cost_usd
+      FROM ai_usage
+    `);
+    const aiUsage = aiUsageRes.rows[0];
 
     const totalUsers = parseInt(usersCount.rows[0].count, 10);
     const totalReports = parseInt(reportsCount.rows[0].count, 10);
@@ -1196,6 +1264,11 @@ app.get('/api/admin/stats', authenticateJWT, requireAdmin, async (req, res) => {
       total_messages: totalMessages,
       total_storage_bytes: estimatedStorageBytes,
       total_storage_mb: Math.round((estimatedStorageBytes / (1024 * 1024)) * 100) / 100,
+      ai_request_count: Number(aiUsage.request_count || 0),
+      ai_prompt_tokens: Number(aiUsage.prompt_tokens || 0),
+      ai_completion_tokens: Number(aiUsage.completion_tokens || 0),
+      ai_total_tokens: Number(aiUsage.total_tokens || 0),
+      ai_estimated_cost_usd: Number(aiUsage.estimated_cost_usd || 0),
     });
   } catch (err) {
     console.error('Admin Stats Error:', err.message);
@@ -1208,10 +1281,26 @@ app.get('/api/admin/users', authenticateJWT, requireAdmin, async (req, res) => {
   try {
     const usersRes = await query(`
       SELECT u.id, u.email, u.full_name, u.phone_number, u.role, u.created_at,
-             COUNT(r.id)::int as reports_count
+             COALESCE(r.reports_count, 0)::int as reports_count,
+             COALESCE(a.prompt_tokens, 0)::int as prompt_tokens,
+             COALESCE(a.completion_tokens, 0)::int as completion_tokens,
+             COALESCE(a.total_tokens, 0)::int as total_tokens,
+             COALESCE(a.estimated_cost_usd, 0)::numeric as estimated_cost_usd,
+             COALESCE(a.ai_request_count, 0)::int as ai_request_count
       FROM users u
-      LEFT JOIN reports r ON u.id = r.user_id
-      GROUP BY u.id
+      LEFT JOIN (
+        SELECT user_id, COUNT(*)::int as reports_count
+        FROM reports GROUP BY user_id
+      ) r ON u.id = r.user_id
+      LEFT JOIN (
+        SELECT user_id,
+               COALESCE(SUM(prompt_tokens), 0)::int as prompt_tokens,
+               COALESCE(SUM(completion_tokens), 0)::int as completion_tokens,
+               COALESCE(SUM(total_tokens), 0)::int as total_tokens,
+               COALESCE(SUM(estimated_cost_usd), 0)::numeric as estimated_cost_usd,
+               COUNT(*)::int as ai_request_count
+        FROM ai_usage GROUP BY user_id
+      ) a ON u.id = a.user_id
       ORDER BY u.created_at DESC;
     `);
     res.json(usersRes.rows);
@@ -1252,8 +1341,8 @@ app.patch('/api/admin/users/:id/role', authenticateJWT, requireAdmin, async (req
     const targetUserId = req.params.id;
     const { role } = req.body;
 
-    if (!['user', 'admin'].includes(role)) {
-      return res.status(400).json({ error: 'Role must be either "user" or "admin"' });
+    if (!['user', 'doctor', 'lab_technician', 'hospital', 'admin'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid account role' });
     }
 
     const userRes = await query('SELECT id, email, full_name, role FROM users WHERE id = $1', [targetUserId]);

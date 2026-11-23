@@ -9,7 +9,7 @@ import { searchMedicalKnowledgeBase } from './medicalKnowledgeBase.js';
  * Step 4 & 5: Prompt Assembly & Evidence Retrieval
  */
 export async function retrieveServerRagContext(options = {}) {
-  const { queryText = '', userId, reportId = null, topK = 5, activeValues = {} } = options;
+  const { queryText = '', userId, reportId = null, topK = 5, activeValues = {}, searchAll = false } = options;
   if (!queryText || !queryText.trim()) {
     return { ragPromptText: '', citations: [], medicalGuidelines: [] };
   }
@@ -71,7 +71,7 @@ export async function retrieveServerRagContext(options = {}) {
     `;
     const params = [userId];
 
-    if (reportId) {
+    if (reportId && !searchAll) {
       sql += ` AND rc.report_id = $2`;
       params.push(reportId);
     }
@@ -86,12 +86,19 @@ export async function retrieveServerRagContext(options = {}) {
     // Try keyword relevance search
     let matchingChunks = [];
     if (queryKeywords.length > 0) {
-      // Build search conditions for each meaningful keyword
-      const keywordConditions = queryKeywords.map((_, idx) => 
+      // Rank chunks by exact and partial query overlap rather than reading arbitrary rows.
+      const keywordConditions = queryKeywords.map((_, idx) =>
         `(rc.chunk_text ILIKE $${params.length + 1 + idx} OR rc.metrics_text ILIKE $${params.length + 1 + idx})`
       ).join(' OR ');
-
-      const searchSql = `${sql} AND (${keywordConditions}) ORDER BY rc.created_at DESC LIMIT $${params.length + 1 + queryKeywords.length}`;
+      const rankingTerms = queryKeywords.map((_, idx) =>
+        `CASE WHEN rc.chunk_text ILIKE $${params.length + 1 + idx} THEN 2 ELSE 0 END`
+      ).join(' + ');
+      const searchSql = `
+        ${sql}
+        AND (${keywordConditions})
+        ORDER BY (${rankingTerms}) DESC, rc.created_at DESC
+        LIMIT $${params.length + 1 + queryKeywords.length}
+      `;
       const searchParams = [...params, ...queryKeywords.map((k) => `%${k}%`), topK];
       const searchRes = await query(searchSql, searchParams).catch(() => ({ rows: [] }));
       matchingChunks = searchRes.rows || [];

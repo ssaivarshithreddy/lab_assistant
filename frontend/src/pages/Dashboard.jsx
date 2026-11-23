@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { Activity, AlertTriangle, ArrowRight, CheckCircle2, Loader2, MessageSquareHeart, Trash2, TrendingDown, TrendingUp, Download, Sparkles, FileText } from "lucide-react";
+import { Activity, AlertTriangle, ArrowRight, CheckCircle2, Loader2, MessageSquareHeart, Trash2, TrendingDown, TrendingUp, Download, Sparkles, FileText, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { MedicalReasoningCard } from "@/components/MedicalReasoningCard";
@@ -95,6 +96,7 @@ const Dashboard = () => {
     const [reports, setReports] = useState([]);
     const [loading, setLoading] = useState(true);
     const [deleting, setDeleting] = useState(false);
+    const [metricSearch, setMetricSearch] = useState("");
 
     useEffect(() => {
         (async () => {
@@ -164,9 +166,10 @@ const Dashboard = () => {
     }
 
     const values = displayValues(current);
-    const detectedMetricCount = METRICS.filter((m) => values[m.key]?.value != null).length;
-    const abnormalCount = METRICS.filter((m) => {
-        const s = values[m.key]?.status;
+    const valueEntries = Object.entries(values).filter(([, item]) => item?.value != null);
+    const detectedMetricCount = valueEntries.length;
+    const abnormalCount = valueEntries.filter(([, item]) => {
+        const s = item?.status;
         return s === "low" || s === "high";
     }).length;
 
@@ -266,6 +269,34 @@ const Dashboard = () => {
           </div>
         )}
 
+        <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+          <Card className="border-border bg-card p-6 sm:p-7">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Latest laboratory result</p>
+                <h2 className="mt-2 max-w-xl text-2xl font-bold tracking-tight text-foreground">
+                  {abnormalCount === 0 ? "No out-of-range parameters detected" : `${abnormalCount} parameter${abnormalCount === 1 ? "" : "s"} need attention`}
+                </h2>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+                  {detectedMetricCount} parameters extracted from {current.file_name}.
+                </p>
+              </div>
+              <Link
+                to={`/assistant/${current.id}`}
+                className="inline-flex h-10 items-center justify-center rounded-lg bg-foreground px-4 text-sm font-semibold text-background transition-colors hover:bg-foreground/90"
+              >
+                Discuss this report
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
+            </div>
+          </Card>
+          <Card className="border-border bg-card p-6">
+            <p className="text-xs font-semibold text-muted-foreground">Reports on file</p>
+            <p className="mt-2 text-3xl font-bold tabular-nums text-foreground">{reports.length}</p>
+            <p className="mt-1 text-xs text-muted-foreground">History available for comparison</p>
+          </Card>
+        </section>
+
         {/* Top 3 Metric Cards */}
         <div className="grid gap-5 md:grid-cols-3">
           <Card className="glass-card rounded-3xl p-6 border-border">
@@ -333,17 +364,32 @@ const Dashboard = () => {
 
         {/* Extracted Test Parameters Grid */}
         <div className="space-y-4">
-          <h2 className="text-xl font-bold text-foreground tracking-tight flex items-center gap-2">
-            Extracted Clinical Test Parameters
-          </h2>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-xl font-bold text-foreground tracking-tight">
+              Extracted clinical test parameters
+            </h2>
+            {valueEntries.length > 4 && (
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={metricSearch}
+                  onChange={(e) => setMetricSearch(e.target.value)}
+                  placeholder="Filter parameters"
+                  className="h-9 pl-9 text-xs"
+                />
+              </div>
+            )}
+          </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {METRICS.map((metric) => {
-              const item = values[metric.key];
+            {Object.entries(values).map(([key, item]) => {
               if (!item || item.value == null) return null;
+              const knownMetric = METRICS.find((metric) => metric.key === key);
+              const label = item.name || knownMetric?.label || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+              if (metricSearch.trim() && !`${key} ${label}`.toLowerCase().includes(metricSearch.toLowerCase())) return null;
               return (
-                <Card key={metric.key} className="glass-card rounded-2xl p-5 border-border space-y-3 hover:border-indigo-500/40 transition-all">
+                <Card key={key} className="glass-card rounded-2xl p-5 border-border space-y-3 hover:border-indigo-500/40 transition-all">
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-sm text-foreground">{metric.label}</span>
+                    <span className="font-bold text-sm text-foreground">{label}</span>
                     <Badge variant="outline" className={cn("capitalize text-[11px] font-bold px-2.5 py-0.5 rounded-full border", statusStyle[item.status] || statusStyle.normal)}>
                       {item.status || "normal"}
                     </Badge>
